@@ -25,6 +25,8 @@ from .config import TopicConfig
 log = logging.getLogger("talmoln.topics")
 
 ANTHROPIC_VERSION = "2026-10-21"
+# Det enda som får lämna telefonen är transkriberad text till Anthropic.
+ALLOWED_API_HOST = "api.anthropic.com"
 TOOL_NAME = "report_topics"
 
 SYSTEM_PROMPT = """\
@@ -100,6 +102,12 @@ class TopicLayer:
         transport: httpx.AsyncBaseTransport | None = None,
         clock=time.time,
     ):
+        host = httpx.URL(cfg.api_url).host
+        if httpx.URL(cfg.api_url).scheme != "https" or host != ALLOWED_API_HOST:
+            raise ValueError(
+                f"topics.api_url måste vara https://{ALLOWED_API_HOST}/…, inte {cfg.api_url!r}. "
+                "Allt utom Anthropic-anropen körs lokalt."
+            )
         self.cfg = cfg
         self.api_key = api_key if api_key is not None else os.environ.get("ANTHROPIC_API_KEY", "").strip()
         self.enabled = cfg.enabled

@@ -39,6 +39,21 @@ Ljudet stannar **på telefonen**: en Python-server i Termux transkriberar lokalt
 └──────────────────────────────────────────────────────────────┘
 ```
 
+### Vad som går över nätet
+
+**Allt körs lokalt på telefonen utom anropen till Anthropic.**
+
+| Vad | Var | Nät vid körning |
+|---|---|---|
+| Mikrofon, PCM-omvandling, ordmoln, gränssnitt | Chrome på telefonen | Nej. Sidan laddar inget utifrån: inga CDN:er och inga webbtypsnitt |
+| Webbserver | Termux, bunden till `127.0.0.1` | Nej |
+| Transkribering (Whisper) | Termux | Nej. Modellen läses från `models/` och laddas aldrig ner automatiskt |
+| Ämnen | Claude API | Ja. Bara transkriberad text skickas, aldrig ljud, och bara till `api.anthropic.com` |
+
+Det kontrolleras i koden: ämneslagret vägrar starta om `topics.api_url` pekar på någon annan värd än `https://api.anthropic.com`. Whisper kräver en befintlig modellfil, eftersom pywhispercpp annars laddar ner en modell när den får ett namn som `base`. Servern varnar om `server.host` sätts till något annat än localhost. `tests/test_local_only.py` testar allt detta och att inga filer i `static/` laddar något utifrån.
+
+Nätet behövs bara en gång vid installationen: `pkg`, `pip`, `git clone` och nedladdningen av Whisper-modellen.
+
 **Varför fånga ljudet i webbläsaren?** Chrome tillåter mikrofon på `localhost` (räknas som säker kontext), och det är mycket enklare än att läsa mikrofonen från Termux. Webbsidan skickar rå **16 kHz mono PCM**, vilket är precis det Whisper vill ha. Då behövs ingen ffmpeg-avkodning på servern.
 
 > ⚠️ Använd inte `MediaRecorder` med timeslice. Bara den första webm-biten har header, så de följande går inte att avkoda var för sig. Vi använder `AudioWorklet` och skickar PCM direkt.
@@ -96,6 +111,7 @@ Ljudet stannar **på telefonen**: en Python-server i Termux transkriberar lokalt
 └── tests/
     ├── test_audio.py
     ├── test_topics.py        # ämneslagret, med låtsas-API
+    ├── test_local_only.py    # inget utom Anthropic-anropen går över nätet
     └── test_server.py
 ```
 

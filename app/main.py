@@ -289,6 +289,9 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
+        if cfg.server.host not in ("127.0.0.1", "localhost", "::1"):
+            log.warning("server.host = %s: sidan nås då från andra enheter i nätverket. "
+                        "Använd 127.0.0.1 för att hålla allt på telefonen.", cfg.server.host)
         session = Session(cfg, transcriber, topics)
         if session.topics.has_key:
             log.info("Ämneslagret: %s, %s (modell %s)", "på" if session.topics.enabled else "av",

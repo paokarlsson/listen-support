@@ -133,6 +133,8 @@ class CliTranscriber(Transcriber):
 
 
 def _resolve_model(path: str) -> Path:
+    """Kräver en befintlig modellfil. pywhispercpp laddar annars ner modeller
+    automatiskt när den får ett namn som "base", och det ska aldrig hända vid körning."""
     p = Path(path)
     if not p.is_absolute():
         p = ROOT / p
