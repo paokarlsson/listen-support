@@ -12,6 +12,7 @@
   --c4: #ff8fab;
   --c5: #c7a6ff;
   --c6: #6ee0d2;
+  --topic: #ffe066;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -35,6 +36,21 @@ header {
   padding: 10px 16px;
 }
 h1 { font-size: 1.1rem; margin: 0; letter-spacing: 0.02em; }
+
+.header-right { display: flex; align-items: center; gap: 12px; }
+.llm {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.75rem; color: var(--muted);
+  background: var(--panel); border: 1px solid #2a3542; border-radius: 999px;
+  padding: 3px 9px;
+}
+.llm .dot { width: 7px; height: 7px; }
+.llm[data-status="ok"] .dot { background: var(--ok); }
+.llm[data-status="pending"] .dot { background: var(--muted); }
+.llm[data-status="offline"] .dot { background: var(--warn); }
+.llm[data-status="error"] .dot { background: var(--accent); }
+.llm[data-status="off"] { opacity: 0.6; text-decoration: line-through; }
+.llm[data-busy="true"] .dot { animation: pulse 0.8s infinite; }
 
 .status { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
@@ -84,7 +100,7 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0
     font-size 0.9s cubic-bezier(.2,.8,.2,1),
     opacity 0.8s ease;
 }
-.word.bigram { font-style: italic; }
+.word.topic { letter-spacing: 0.01em; text-shadow: 0 0 18px rgba(255, 224, 102, 0.25); }
 .word.entering { opacity: 0 !important; font-size: 4px !important; }
 .word.leaving, .word.hidden { opacity: 0 !important; }
 
@@ -144,5 +160,8 @@ dialog label { display: block; margin-bottom: 16px; }
 dialog input[type="range"] { width: 100%; margin-top: 6px; }
 dialog small { color: var(--muted); }
 dialog .check { display: flex; gap: 8px; align-items: center; }
+dialog fieldset { border: 1px solid #2a3542; border-radius: 10px; margin: 0 0 16px; padding: 10px 12px 0; }
+dialog legend { color: var(--muted); font-size: 0.85rem; padding: 0 4px; }
+dialog .note { display: block; margin: -8px 0 12px; }
 dialog .row { display: flex; gap: 8px; justify-content: space-between; margin-top: 8px; }
 dialog .row.end { justify-content: flex-end; }

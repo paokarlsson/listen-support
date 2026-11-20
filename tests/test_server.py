@@ -3,6 +3,7 @@ from starlette.testclient import TestClient
 
 from app.config import Config, AudioConfig
 from app.main import create_app
+from app.topics import TopicLayer
 from app.transcriber import Transcriber, clean_text
 
 
@@ -25,7 +26,8 @@ def tone(seconds, amp=8000):
 def make_client():
     cfg = Config(audio=AudioConfig(chunk_seconds=1, max_chunk_seconds=1.5))
     fake = FakeTranscriber()
-    return TestClient(create_app(cfg, transcriber=fake)), fake
+    topics = TopicLayer(cfg.topics, api_key="")  # ingen nyckel: snabba lagret ensamt
+    return TestClient(create_app(cfg, transcriber=fake, topics=topics)), fake
 
 
 def test_ws_flow_reset_and_export():
@@ -35,6 +37,7 @@ def test_ws_flow_reset_and_export():
             hello = ws.receive_json()
             assert hello["type"] == "hello"
             assert hello["settings"]["transcriber"] == "fake"
+            assert hello["llm"]["status"] == "off" and hello["llm"]["reason"] == "no_key"
 
             ws.send_bytes(tone(1.6))
             msgs = [ws.receive_json(), ws.receive_json()]
@@ -43,6 +46,7 @@ def test_ws_flow_reset_and_export():
             update = next(m for m in msgs if m["type"] == "update")
             assert update["segment"].startswith("vi måste")
             assert update["terms"][0]["weight"] == 1.0
+            assert {t["kind"] for t in update["terms"]} == {"keyword"}
             assert "latency_ms" in update
 
             ws.send_json({"type": "settings", "half_life": 60, "top_n": 10})
@@ -52,7 +56,8 @@ def test_ws_flow_reset_and_export():
 
             exp = client.get("/export").json()
             assert len(exp["segments"]) == 1
-            assert exp["terms"]
+            assert exp["keywords"] and exp["top"]
+            assert exp["topics"] == []
 
             assert client.post("/reset").json() == {"ok": True}
             assert ws.receive_json()["type"] == "reset"

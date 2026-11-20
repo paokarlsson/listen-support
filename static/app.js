@@ -13,6 +13,7 @@ const state = {
   lastLatency: null,
   backlog: 0,
   sentBytes: 0,
+  llm: null,
 };
 
 // ---------------------------------------------------------------- WebSocket
@@ -41,6 +42,7 @@ function send(obj) {
 }
 
 function handleMessage(msg) {
+  if (msg.llm) renderLlm(msg.llm);
   switch (msg.type) {
     case 'hello':
       applySettings(msg.settings);
@@ -193,6 +195,38 @@ function showWarning(text) {
   el.hidden = !text;
 }
 
+const LLM_TEXT = {
+  ok: 'Ämnen',
+  pending: 'Ämnen…',
+  offline: 'Ämnen offline',
+  error: 'Ämnen: fel',
+  off: 'Ämnen av',
+};
+
+function renderLlm(llm) {
+  state.llm = llm;
+  const el = $('llm');
+  el.dataset.status = llm.status;
+  el.dataset.busy = llm.busy ? 'true' : 'false';
+  $('llm-text').textContent = LLM_TEXT[llm.status] || 'Ämnen';
+  let title = `Ämneslagret (${llm.model})`;
+  if (llm.last_update_s != null) title += ` · uppdaterat för ${llm.last_update_s} s sedan`;
+  if (llm.reason && llm.status !== 'off') title += ` · ${llm.reason}`;
+  el.title = title;
+
+  const cb = $('llm-enabled');
+  cb.checked = llm.enabled && llm.has_key;
+  cb.disabled = !llm.has_key;
+  $('llm-note').textContent = llm.has_key
+    ? 'Skickar transkriberad text (aldrig ljud) till Anthropic.'
+    : 'Ingen API-nyckel. Lägg ANTHROPIC_API_KEY i .env och starta om servern.';
+  const u = llm.usage || {};
+  $('llm-usage').textContent = u.calls || u.failed
+    ? `Den här sessionen: ${u.calls} anrop, ${u.input_tokens} tokens in, ${u.output_tokens} ut` +
+      (u.failed ? `, ${u.failed} misslyckade` : '') + '.'
+    : '';
+}
+
 // ---------------------------------------------------------------- Inställningar
 
 function applySettings(s) {
@@ -201,6 +235,10 @@ function applySettings(s) {
   $('half-life-out').textContent = `${Math.round(s.half_life)} s`;
   $('top-n').value = s.top_n;
   $('top-n-out').textContent = s.top_n;
+  if (s.llm_interval != null) {
+    $('llm-interval').value = s.llm_interval;
+    $('llm-interval-out').textContent = `${Math.round(s.llm_interval)} s`;
+  }
   if (s.transcriber_error) {
     showWarning(`Transkriberingen är avstängd: ${s.transcriber_error}`);
   } else if (s.transcriber === 'stub') {
@@ -214,7 +252,12 @@ let settingsTimer;
 function sendSettings() {
   clearTimeout(settingsTimer);
   settingsTimer = setTimeout(() => {
-    send({ type: 'settings', half_life: Number($('half-life').value), top_n: Number($('top-n').value) });
+    send({
+      type: 'settings',
+      half_life: Number($('half-life').value),
+      top_n: Number($('top-n').value),
+      llm_interval: Number($('llm-interval').value),
+    });
   }, 250);
 }
 
@@ -226,6 +269,15 @@ $('top-n').addEventListener('input', (e) => {
   $('top-n-out').textContent = e.target.value;
   sendSettings();
 });
+
+$('llm-interval').addEventListener('input', (e) => {
+  $('llm-interval-out').textContent = `${e.target.value} s`;
+  sendSettings();
+});
+$('llm-enabled').addEventListener('change', (e) => {
+  send({ type: 'settings', llm_enabled: e.target.checked });
+});
+$('llm').addEventListener('click', () => $('settings').showModal());
 
 const SHOW_KEY = 'talmoln.showTranscript';
 function setShowTranscript(on) {

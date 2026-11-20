@@ -38,3 +38,17 @@ bigram_min_count = 2
 forget_below = 0.01
 # Hur ofta servern skickar uppdaterade vikter även utan nytt tal (avklingning).
 tick_seconds = 2.0
+
+[topics]
+# Ämneslagret skickar transkriberad TEXT (aldrig ljud) till Claude API.
+# Kräver ANTHROPIC_API_KEY i miljön eller i .env. Utan nyckel är lagret avstängt.
+enabled = true                 # startläge – kan slås av/på i appen
+model = "claude-haiku-5-5"
+interval_seconds = 45.0        # som tätast ett anrop per intervall …
+min_new_words = 40             # … och bara om så här många nya ord har kommit
+window_seconds = 180.0         # hur många sekunder bakåt av transkriptet som skickas
+max_topics = 8
+timeout_seconds = 15.0
+half_life_seconds = 120.0      # ämnesvikter avklingar mellan anropen
+keyword_scale = 0.6            # nyckelord skalas ned relativt ämnen
+covered_keyword_factor = 0.35  # nyckelord som ingår i ett ämne tonas ned ytterligare

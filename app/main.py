@@ -16,14 +16,17 @@ from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .audio import AudioChunker, Chunk
-from .config import ROOT, Config, load_config
-from .keywords import KeywordEngine
+from .config import ROOT, Config, load_config, load_env
+from .keywords import KeywordEngine, tokenize
+from .merge import merge
+from .topics import TopicLayer
 from .transcriber import StubTranscriber, Transcriber, create_transcriber
 
 log = logging.getLogger("talmoln")
 STATIC = ROOT / "static"
 PROMPT_CHARS = 200
 MAX_BACKLOG = 3  # fler väntande bitar än så = vi ligger efter, släng de äldsta
+TOPIC_CHECK_SECONDS = 2.0
 
 
 @dataclass
@@ -37,9 +40,11 @@ class Segment:
 class Session:
     """Delat tillstånd: transkript, nyckelord och anslutna klienter."""
 
-    def __init__(self, cfg: Config, transcriber: Transcriber | None = None):
+    def __init__(self, cfg: Config, transcriber: Transcriber | None = None, topics: TopicLayer | None = None):
         self.cfg = cfg
         self.engine = KeywordEngine(cfg.keywords)
+        self.topics = topics or TopicLayer(cfg.topics)
+        self.words_since_topics = 0
         self.transcriber: Transcriber = transcriber or StubTranscriber()
         self.transcriber_error: str | None = None
         self.segments: list[Segment] = []
@@ -57,6 +62,9 @@ class Session:
             "chunk_seconds": self.cfg.audio.chunk_seconds,
             "transcriber": self.transcriber.name,
             "transcriber_error": self.transcriber_error,
+            "llm_enabled": self.topics.enabled,
+            "llm_interval": self.topics.interval,
+            "llm_available": self.topics.has_key,
         }
 
     def apply_settings(self, data: dict) -> None:
@@ -64,13 +72,35 @@ class Session:
             self.engine.set_half_life(min(3600.0, max(5.0, float(data["half_life"]))))
         if "top_n" in data:
             self.engine.top_n = int(min(150, max(5, int(data["top_n"]))))
+        if "llm_enabled" in data:
+            self.topics.set_enabled(bool(data["llm_enabled"]))
+            log.info("Ämneslagret %s", "på" if self.topics.enabled else "av")
+        if "llm_interval" in data:
+            self.topics.interval = min(600.0, max(15.0, float(data["llm_interval"])))
 
     def reset(self) -> None:
         self.engine.reset()
         self.segments.clear()
+        self.topics.reset()
+        self.words_since_topics = 0
         while not self.queue.empty():
             self.queue.get_nowait()
         self.started_at = time.time()
+
+    # -- vikter -------------------------------------------------------------
+
+    def cloud_terms(self, now: float | None = None) -> list[dict]:
+        """Ämnen + nyckelord sammanslagna till det som visas i molnet."""
+        now = time.time() if now is None else now
+        topics = self.topics.current(now) if self.topics.enabled else []
+        return merge(self.engine.top(now=now), topics, self.cfg.topics, self.engine.top_n, self.engine.stem)
+
+    def transcript_window(self, now: float | None = None) -> str:
+        now = time.time() if now is None else now
+        lines = [s.text for s in self.segments if s.received_at >= now - self.cfg.topics.window_seconds]
+        text = "\n".join(lines)
+        limit = self.cfg.topics.max_window_chars
+        return text[-limit:] if len(text) > limit else text
 
     # -- kommunikation -----------------------------------------------------
 
@@ -113,10 +143,12 @@ class Session:
             self.segments.append(seg)
             # Ordet räknas från när det sades, inte när transkriberingen blev klar.
             self.engine.add_text(text, now=received_at)
+            self.words_since_topics += len(tokenize(text))
             await self.broadcast({
                 "type": "update",
                 "segment": text,
-                "terms": self.engine.top(),
+                "terms": self.cloud_terms(),
+                "llm": self.topics.info(),
                 "latency_ms": latency_ms,
                 "backlog": self.queue.qsize(),
             })
@@ -125,8 +157,26 @@ class Session:
         """Skicka vikter regelbundet så att molnet avklingar även i tystnad."""
         while True:
             await asyncio.sleep(self.cfg.keywords.tick_seconds)
-            if self.clients and self.engine.terms:
-                await self.broadcast({"type": "terms", "terms": self.engine.top()})
+            if self.clients and (self.engine.terms or self.topics.topics):
+                await self.broadcast({"type": "terms", "terms": self.cloud_terms(), "llm": self.topics.info()})
+
+    async def topic_loop(self) -> None:
+        """Fråga Claude om ämnen när intervallet gått och tillräckligt mycket nytt sagts."""
+        while True:
+            await asyncio.sleep(TOPIC_CHECK_SECONDS)
+            if not self.topics.should_call(self.words_since_topics):
+                continue
+            transcript = self.transcript_window()
+            if not transcript:
+                continue
+            self.words_since_topics = 0
+            task = asyncio.create_task(self.topics.refresh(transcript))
+            await self.broadcast({"type": "llm", "llm": self.topics.info()})
+            try:
+                await task
+            except Exception:  # ska aldrig hända, men appen får inte dö av ämneslagret
+                log.exception("Oväntat fel i ämneslagret")
+            await self.broadcast({"type": "terms", "terms": self.cloud_terms(), "llm": self.topics.info()})
 
 
 # -- routes ----------------------------------------------------------------
@@ -159,8 +209,13 @@ async def export(request):
             for s in session.segments
         ],
         "transcript": " ".join(s.text for s in session.segments),
-        "top": session.engine.top(now=now),
-        "terms": session.engine.snapshot(now=now),
+        "top": session.cloud_terms(now=now),
+        "keywords": session.engine.snapshot(now=now),
+        "topics": [
+            {"label": t.label, "score": round(t.score, 4), "keywords": t.keywords}
+            for t in session.topics.current(now)
+        ],
+        "llm": session.topics.info(now),
     }
     headers = {}
     if request.query_params.get("download"):
@@ -178,7 +233,8 @@ async def ws_endpoint(ws: WebSocket):
         "type": "hello",
         "settings": session.settings(),
         "segments": [s.text for s in session.segments[-50:]],
-        "terms": session.engine.top(),
+        "terms": session.cloud_terms(),
+        "llm": session.topics.info(),
     })
     try:
         while True:
@@ -218,7 +274,7 @@ async def _handle_text(session: Session, ws: WebSocket, chunker: AudioChunker, t
     if kind == "settings":
         session.apply_settings(data)
         await session.broadcast({"type": "settings", "settings": session.settings(),
-                                 "terms": session.engine.top()})
+                                 "terms": session.cloud_terms(), "llm": session.topics.info()})
     elif kind == "stop":
         chunk = chunker.flush()
         if chunk is not None:
@@ -229,12 +285,23 @@ async def _handle_text(session: Session, ws: WebSocket, chunker: AudioChunker, t
 
 # -- app -------------------------------------------------------------------
 
-def create_app(cfg: Config | None = None, transcriber: Transcriber | None = None) -> Starlette:
-    cfg = cfg or load_config()
+def create_app(
+    cfg: Config | None = None,
+    transcriber: Transcriber | None = None,
+    topics: TopicLayer | None = None,
+) -> Starlette:
+    if cfg is None:
+        load_env()
+        cfg = load_config()
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
-        session = Session(cfg, transcriber)
+        session = Session(cfg, transcriber, topics)
+        if session.topics.has_key:
+            log.info("Ämneslagret: %s, %s (modell %s)", "på" if session.topics.enabled else "av",
+                     f"var {session.topics.interval:.0f}:e s", cfg.topics.model)
+        else:
+            log.info("Ämneslagret: av (ingen ANTHROPIC_API_KEY)")
         if transcriber is None:
             try:
                 log.info("Laddar transkriberare (%s, %s)…", cfg.transcriber.backend, cfg.transcriber.model_path)
@@ -246,7 +313,8 @@ def create_app(cfg: Config | None = None, transcriber: Transcriber | None = None
                 session.transcriber_error = str(exc)
         app.state.session = session
         tasks = [asyncio.create_task(session.transcribe_worker()),
-                 asyncio.create_task(session.ticker())]
+                 asyncio.create_task(session.ticker()),
+                 asyncio.create_task(session.topic_loop())]
         try:
             yield
         finally:
@@ -266,4 +334,5 @@ def create_app(cfg: Config | None = None, transcriber: Transcriber | None = None
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # loggar annars varje anrop
 app = create_app()

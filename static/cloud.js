@@ -63,19 +63,21 @@ export class WordCloud {
       seen.add(text);
       const weight = Math.max(0, Math.min(1, term.weight));
       let size = minSize + (maxSize - minSize) * Math.pow(weight, 0.75);
-      const fw = weight > 0.6 ? 700 : weight > 0.3 ? 600 : 500;
+      const fw = term.kind === 'topic' ? 800 : weight > 0.6 ? 700 : weight > 0.3 ? 600 : 500;
 
       let w = this.words.get(text);
       if (!w) {
         const el = document.createElement('span');
         el.className = 'word entering';
         el.textContent = text;
-        el.style.color = `var(${PALETTE[hash(text) % PALETTE.length]})`;
-        if (term.kind === 'bigram') el.classList.add('bigram');
         this.el.appendChild(el);
         w = { el, x: null, y: null };
         this.words.set(text, w);
       }
+      // Ämnen från Claude har en egen färg; nyckelord färgas efter ordet.
+      const isTopic = term.kind === 'topic';
+      w.el.classList.toggle('topic', isTopic);
+      w.el.style.color = isTopic ? 'var(--topic)' : `var(${PALETTE[hash(text) % PALETTE.length]})`;
 
       // Försök några gånger med mindre storlek om ordet inte får plats.
       let spot = null;
