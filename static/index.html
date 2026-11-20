@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101418">
+  <title>Talmoln</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Talmoln</h1>
+    <div id="status" class="status"><span class="dot"></span><span id="status-text">Ansluter…</span></div>
+  </header>
+
+  <div id="warning" class="warning" hidden></div>
+
+  <main>
+    <div id="cloud" class="cloud">
+      <p id="empty" class="empty">Tryck på 🎙️ och börja prata.<br>Det du pratar om växer fram här.</p>
+    </div>
+
+    <section class="transcript-wrap">
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="meter" aria-hidden="true"><div id="level" class="level"></div></div>
+    <div class="controls">
+      <button id="settings-btn" class="icon" title="Inställningar" aria-label="Inställningar">⚙️</button>
+      <button id="mic" class="mic" aria-pressed="false" aria-label="Starta mikrofonen">🎙️</button>
+      <span id="info" class="info"></span>
+    </div>
+  </footer>
+
+  <dialog id="settings">
+    <form method="dialog">
+      <h2>Inställningar</h2>
+      <label>
+        Halveringstid: <output id="half-life-out">120 s</output>
+        <input id="half-life" type="range" min="15" max="900" step="15" value="120">
+        <small>Hur snabbt gamla ämnen tonar ut.</small>
+      </label>
+      <label>
+        Antal ord: <output id="top-n-out">40</output>
+        <input id="top-n" type="range" min="10" max="100" step="5" value="40">
+      </label>
+      <label class="check">
+        <input id="show-transcript" type="checkbox" checked> Visa transkript
+      </label>
+      <div class="row">
+        <button type="button" id="export">Exportera JSON</button>
+        <button type="button" id="reset" class="danger">Nollställ</button>
+      </div>
+      <div class="row end"><button value="close">Stäng</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

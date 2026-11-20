@@ -1,0 +1,40 @@
+# Talmoln – inställningar. Alla värden har standardvärden i app/config.py,
+# så det räcker att ange det du vill ändra.
+
+[server]
+host = "127.0.0.1"
+port = 8000
+
+[transcriber]
+# "whispercpp" = pywhispercpp (rekommenderat)
+# "cli"        = anropa whisper-cli via subprocess (reservplan om pywhispercpp inte bygger)
+# "stub"       = ingen transkribering, bara eko av ljudmängd (fas 1 / felsökning)
+backend = "whispercpp"
+model_path = "models/ggml-base.bin"
+language = "sv"
+threads = 4
+# Endast för backend = "cli"
+cli_binary = "whisper-cli"
+# Skicka slutet av förra biten som prompt till Whisper. Ger bättre sammanhang
+# över chunk-gränser men kan ibland få Whisper att upprepa sig.
+use_prompt = true
+
+[audio]
+sample_rate = 16000
+# Sikta på bitar om ~6 s. Klipp i den tystaste punkten inom sök-fönstret.
+chunk_seconds = 6.0
+max_chunk_seconds = 9.0
+cut_search_seconds = 2.0
+# Energibaserad VAD: bitar vars RMS (int16-skala) ligger under detta hoppas över.
+vad_rms_threshold = 250.0
+
+[keywords]
+half_life_seconds = 120.0
+top_n = 40
+min_word_length = 3
+# Antal förekomster innan ett bigram visas som eget begrepp.
+bigram_min_count = 2
+# Termer vars poäng sjunkit under detta glöms helt.
+forget_below = 0.01
+# Hur ofta servern skickar uppdaterade vikter även utan nytt tal (avklingning).
+tick_seconds = 2.0
