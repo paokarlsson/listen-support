@@ -170,6 +170,40 @@ class TopicLayer:
             and now - self.last_attempt >= self.interval
         )
 
+    def set_half_life(self, seconds: float, now: float | None = None) -> None:
+        """Byt halveringstid. Nuvarande vikter behålls och avklingar sedan i ny takt."""
+        now = self.clock() if now is None else now
+        for t in self.topics.values():
+            t.score = t.score_at(now, self.cfg.half_life_seconds)
+            t.updated = now
+        self.cfg.half_life_seconds = max(5.0, float(seconds))
+
+    def cloud_terms(self, now: float | None = None, max_words: int | None = None) -> list[dict]:
+        """Det som visas i molnet: ämnesnamn som stora ord och ämnenas ord runt
+        omkring. Vikter normaliseras till 0–1. `topic` anger vilket ämne ett ord
+        hör till, så att klienten kan färga dem lika."""
+        now = self.clock() if now is None else now
+        max_words = max_words or self.cfg.max_words
+        topics = self.current(now) if self.enabled else []
+        if not topics:
+            return []
+        rows: dict[str, dict] = {}
+        for t in topics:
+            rows[_norm(t.label)] = {"text": t.label, "weight": t.score, "kind": "topic", "topic": t.label}
+        if self.cfg.show_keywords:
+            for t in topics:
+                for kw in t.keywords:
+                    key = _norm(kw)
+                    w = t.score * self.cfg.keyword_factor
+                    if key in rows and rows[key]["weight"] >= w:
+                        continue
+                    rows[key] = {"text": kw, "weight": w, "kind": "keyword", "topic": t.label}
+        out = sorted(rows.values(), key=lambda r: (-r["weight"], r["kind"] != "topic", r["text"]))[:max_words]
+        top = out[0]["weight"] or 1.0
+        for r in out:
+            r["weight"] = round(r["weight"] / top, 4)
+        return out
+
     def current(self, now: float | None = None) -> list[Topic]:
         """Ämnen med avklingad poäng, starkast först. Döda ämnen rensas bort."""
         now = self.clock() if now is None else now

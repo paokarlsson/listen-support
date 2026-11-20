@@ -34,22 +34,12 @@ class AudioConfig:
 
 
 @dataclass
-class KeywordConfig:
-    half_life_seconds: float = 120.0
-    top_n: int = 40
-    min_word_length: int = 3
-    bigram_min_count: int = 2
-    forget_below: float = 0.01
-    tick_seconds: float = 2.0
-
-
-@dataclass
 class TopicConfig:
     # Ämneslagret (Claude). Kräver ANTHROPIC_API_KEY i miljön eller i .env.
     enabled: bool = True              # startläge; kan slås av/på i gränssnittet
     model: str = "claude-haiku-5-5"
-    interval_seconds: float = 45.0
-    min_new_words: int = 40
+    interval_seconds: float = 20.0
+    min_new_words: int = 20
     window_seconds: float = 180.0
     max_window_chars: int = 8000
     max_topics: int = 8
@@ -58,10 +48,11 @@ class TopicConfig:
     # Hur ämnens vikt avklingar mellan anropen.
     half_life_seconds: float = 120.0
     forget_below: float = 0.05
-    # Sammanslagning med nyckelorden (merge.py)
-    topic_boost: float = 1.0          # ämnen räknas i full skala ...
-    keyword_scale: float = 0.6        # ... nyckelord skalas ned så att ämnena blir störst
-    covered_keyword_factor: float = 0.35  # nyckelord som ingår i ett ämne tonas ned
+    # Molnet: ämnesnamn som stora ord, och (valfritt) ämnenas ord från Claude runt omkring.
+    show_keywords: bool = True
+    keyword_factor: float = 0.45      # ett ämnesords storlek relativt sitt ämne
+    max_words: int = 40
+    tick_seconds: float = 2.0         # hur ofta avklingade vikter skickas ut
     api_url: str = "https://api.anthropic.com/v1/messages"
 
 
@@ -70,7 +61,6 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     transcriber: TranscriberConfig = field(default_factory=TranscriberConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
-    keywords: KeywordConfig = field(default_factory=KeywordConfig)
     topics: TopicConfig = field(default_factory=TopicConfig)
 
 
@@ -113,6 +103,5 @@ def load_config(path: str | Path | None = None) -> Config:
         server=_fill(ServerConfig, raw.get("server", {})),
         transcriber=_fill(TranscriberConfig, raw.get("transcriber", {})),
         audio=_fill(AudioConfig, raw.get("audio", {})),
-        keywords=_fill(KeywordConfig, raw.get("keywords", {})),
         topics=_fill(TopicConfig, raw.get("topics", {})),
     )

@@ -74,10 +74,10 @@ export class WordCloud {
         w = { el, x: null, y: null };
         this.words.set(text, w);
       }
-      // Ämnen från Claude har en egen färg; nyckelord färgas efter ordet.
+      // Ett ämne och dess ord får samma färg, så att de syns som en grupp.
       const isTopic = term.kind === 'topic';
       w.el.classList.toggle('topic', isTopic);
-      w.el.style.color = isTopic ? 'var(--topic)' : `var(${PALETTE[hash(text) % PALETTE.length]})`;
+      w.el.style.color = `var(${PALETTE[hash((term.topic || text).toLowerCase()) % PALETTE.length]})`;
 
       // Försök några gånger med mindre storlek om ordet inte får plats.
       let spot = null;

@@ -45,8 +45,7 @@ def test_ws_flow_reset_and_export():
             assert kinds == {"chunk", "update"}
             update = next(m for m in msgs if m["type"] == "update")
             assert update["segment"].startswith("vi måste")
-            assert update["terms"][0]["weight"] == 1.0
-            assert {t["kind"] for t in update["terms"]} == {"keyword"}
+            assert update["terms"] == []  # utan nyckel inga ämnen – molnet kommer bara från Claude
             assert "latency_ms" in update
 
             ws.send_json({"type": "settings", "half_life": 60, "top_n": 10})
@@ -56,8 +55,7 @@ def test_ws_flow_reset_and_export():
 
             exp = client.get("/export").json()
             assert len(exp["segments"]) == 1
-            assert exp["keywords"] and exp["top"]
-            assert exp["topics"] == []
+            assert exp["top"] == [] and exp["topics"] == []
 
             assert client.post("/reset").json() == {"ok": True}
             assert ws.receive_json()["type"] == "reset"

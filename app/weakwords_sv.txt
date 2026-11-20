@@ -1,7 +1,0 @@
-# Svaga ord: får ingå i bigram ("nya kontoret", "stora mötet") men visas inte
-# ensamma i molnet. Ett ord per rad eller flera per rad, # = kommentar.
-ny nytt nya gammal gammalt gamla stor stort stora liten litet lilla små
-lång långt långa kort kortare hög högt höga låg lågt låga
-bättre bäst bästa sämre sämst första sista nästa förra senaste
-egen eget egna olika samma vanlig vanligt vanliga viktig viktigt viktiga
-prata pratar pratade pratat snacka snackar snackade

@@ -19,10 +19,11 @@
   </header>
 
   <div id="warning" class="warning" hidden></div>
+  <div id="notice" class="warning" hidden></div>
 
   <main>
     <div id="cloud" class="cloud">
-      <p id="empty" class="empty">Tryck på 🎙️ och börja prata.<br>Det du pratar om växer fram här.</p>
+      <p id="empty" class="empty">Tryck på 🎙️ och börja prata.<br>Efter några meningar växer ämnena fram här.</p>
     </div>
 
     <section class="transcript-wrap">
@@ -49,7 +50,7 @@
       </label>
       <label>
         Antal ord: <output id="top-n-out">40</output>
-        <input id="top-n" type="range" min="10" max="100" step="5" value="40">
+        <input id="top-n" type="range" min="5" max="80" step="5" value="40">
       </label>
       <fieldset>
         <legend>Ämnen med Claude</legend>
@@ -58,8 +59,8 @@
         </label>
         <small class="note" id="llm-note">Skickar transkriberad text (aldrig ljud) till Anthropic.</small>
         <label>
-          Intervall: <output id="llm-interval-out">45 s</output>
-          <input id="llm-interval" type="range" min="15" max="300" step="15" value="45">
+          Intervall: <output id="llm-interval-out">20 s</output>
+          <input id="llm-interval" type="range" min="10" max="120" step="5" value="20">
         </label>
         <small class="note" id="llm-usage"></small>
       </fieldset>

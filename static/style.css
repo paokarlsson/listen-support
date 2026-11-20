@@ -12,7 +12,6 @@
   --c4: #ff8fab;
   --c5: #c7a6ff;
   --c6: #6ee0d2;
-  --topic: #ffe066;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -100,7 +99,8 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0
     font-size 0.9s cubic-bezier(.2,.8,.2,1),
     opacity 0.8s ease;
 }
-.word.topic { letter-spacing: 0.01em; text-shadow: 0 0 18px rgba(255, 224, 102, 0.25); }
+.word.topic { letter-spacing: 0.01em; text-shadow: 0 0 16px color-mix(in srgb, currentColor 35%, transparent); }
+.word:not(.topic) { filter: saturate(0.7); }
 .word.entering { opacity: 0 !important; font-size: 4px !important; }
 .word.leaving, .word.hidden { opacity: 0 !important; }
 

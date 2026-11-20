@@ -28,27 +28,18 @@ cut_search_seconds = 2.0
 # Energibaserad VAD: bitar vars RMS (int16-skala) ligger under detta hoppas över.
 vad_rms_threshold = 250.0
 
-[keywords]
-half_life_seconds = 120.0
-top_n = 40
-min_word_length = 3
-# Antal förekomster innan ett bigram visas som eget begrepp.
-bigram_min_count = 2
-# Termer vars poäng sjunkit under detta glöms helt.
-forget_below = 0.01
-# Hur ofta servern skickar uppdaterade vikter även utan nytt tal (avklingning).
-tick_seconds = 2.0
-
 [topics]
-# Ämneslagret skickar transkriberad TEXT (aldrig ljud) till Claude API.
-# Kräver ANTHROPIC_API_KEY i miljön eller i .env. Utan nyckel är lagret avstängt.
+# Ordmolnet kommer helt från ämneslagret. Det skickar transkriberad TEXT (aldrig ljud) till Claude API.
+# Kräver ANTHROPIC_API_KEY i miljön eller i .env. Utan nyckel visas bara transkriptet.
 enabled = true                 # startläge – kan slås av/på i appen
 model = "claude-haiku-5-5"
-interval_seconds = 45.0        # som tätast ett anrop per intervall …
-min_new_words = 40             # … och bara om så här många nya ord har kommit
+interval_seconds = 20.0        # som tätast ett anrop per intervall …
+min_new_words = 20             # … och bara om så här många nya ord har kommit
 window_seconds = 180.0         # hur många sekunder bakåt av transkriptet som skickas
 max_topics = 8
 timeout_seconds = 15.0
 half_life_seconds = 120.0      # ämnesvikter avklingar mellan anropen
-keyword_scale = 0.6            # nyckelord skalas ned relativt ämnen
-covered_keyword_factor = 0.35  # nyckelord som ingår i ett ämne tonas ned ytterligare
+show_keywords = true           # visa ämnenas ord (från Claude) som mindre ord runt ämnet
+keyword_factor = 0.45          # ett ämnesords storlek relativt sitt ämne
+max_words = 40
+tick_seconds = 2.0             # hur ofta avklingade vikter skickas till klienten

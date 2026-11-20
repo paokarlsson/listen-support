@@ -189,6 +189,12 @@ function updateInfo() {
   $('info').textContent = parts.join(' · ');
 }
 
+function setCloudNotice(text) {
+  const el = $('notice');
+  el.textContent = text;
+  el.hidden = !text;
+}
+
 function showWarning(text) {
   const el = $('warning');
   el.textContent = text;
@@ -220,6 +226,11 @@ function renderLlm(llm) {
   $('llm-note').textContent = llm.has_key
     ? 'Skickar transkriberad text (aldrig ljud) till Anthropic.'
     : 'Ingen API-nyckel. Lägg ANTHROPIC_API_KEY i .env och starta om servern.';
+  // Molnet kommer helt från Claude: säg varför det är tomt när lagret inte kan köras.
+  const blocked = !llm.has_key
+    ? 'Ordmolnet kräver Claude: lägg ANTHROPIC_API_KEY i .env och starta om servern. Transkriptet fungerar ändå.'
+    : !llm.enabled ? 'Ämnen med Claude är avslaget, så molnet är tomt. Slå på det under ⚙️.' : '';
+  setCloudNotice(blocked);
   const u = llm.usage || {};
   $('llm-usage').textContent = u.calls || u.failed
     ? `Den här sessionen: ${u.calls} anrop, ${u.input_tokens} tokens in, ${u.output_tokens} ut` +

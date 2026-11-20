@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,8 +18,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .audio import AudioChunker, Chunk
 from .config import ROOT, Config, load_config, load_env
-from .keywords import KeywordEngine, tokenize
-from .merge import merge
 from .topics import TopicLayer
 from .transcriber import StubTranscriber, Transcriber, create_transcriber
 
@@ -26,7 +25,8 @@ log = logging.getLogger("talmoln")
 STATIC = ROOT / "static"
 PROMPT_CHARS = 200
 MAX_BACKLOG = 3  # fler väntande bitar än så = vi ligger efter, släng de äldsta
-TOPIC_CHECK_SECONDS = 2.0
+TOPIC_CHECK_SECONDS = 1.0
+_WORD_RE = re.compile(r"[^\W\d_]+")
 
 
 @dataclass
@@ -42,7 +42,6 @@ class Session:
 
     def __init__(self, cfg: Config, transcriber: Transcriber | None = None, topics: TopicLayer | None = None):
         self.cfg = cfg
-        self.engine = KeywordEngine(cfg.keywords)
         self.topics = topics or TopicLayer(cfg.topics)
         self.words_since_topics = 0
         self.transcriber: Transcriber = transcriber or StubTranscriber()
@@ -57,8 +56,8 @@ class Session:
 
     def settings(self) -> dict:
         return {
-            "half_life": self.engine.half_life,
-            "top_n": self.engine.top_n,
+            "half_life": self.topics.cfg.half_life_seconds,
+            "top_n": self.topics.cfg.max_words,
             "chunk_seconds": self.cfg.audio.chunk_seconds,
             "transcriber": self.transcriber.name,
             "transcriber_error": self.transcriber_error,
@@ -69,17 +68,16 @@ class Session:
 
     def apply_settings(self, data: dict) -> None:
         if "half_life" in data:
-            self.engine.set_half_life(min(3600.0, max(5.0, float(data["half_life"]))))
+            self.topics.set_half_life(min(3600.0, max(5.0, float(data["half_life"]))))
         if "top_n" in data:
-            self.engine.top_n = int(min(150, max(5, int(data["top_n"]))))
+            self.topics.cfg.max_words = int(min(150, max(3, int(data["top_n"]))))
         if "llm_enabled" in data:
             self.topics.set_enabled(bool(data["llm_enabled"]))
             log.info("Ämneslagret %s", "på" if self.topics.enabled else "av")
         if "llm_interval" in data:
-            self.topics.interval = min(600.0, max(15.0, float(data["llm_interval"])))
+            self.topics.interval = min(600.0, max(10.0, float(data["llm_interval"])))
 
     def reset(self) -> None:
-        self.engine.reset()
         self.segments.clear()
         self.topics.reset()
         self.words_since_topics = 0
@@ -90,10 +88,8 @@ class Session:
     # -- vikter -------------------------------------------------------------
 
     def cloud_terms(self, now: float | None = None) -> list[dict]:
-        """Ämnen + nyckelord sammanslagna till det som visas i molnet."""
-        now = time.time() if now is None else now
-        topics = self.topics.current(now) if self.topics.enabled else []
-        return merge(self.engine.top(now=now), topics, self.cfg.topics, self.engine.top_n, self.engine.stem)
+        """Det som visas i molnet – allt kommer från ämneslagret."""
+        return self.topics.cloud_terms(now)
 
     def transcript_window(self, now: float | None = None) -> str:
         now = time.time() if now is None else now
@@ -141,9 +137,7 @@ class Session:
                 continue
             seg = Segment(text=text, received_at=received_at, duration_s=chunk.duration_s, latency_ms=latency_ms)
             self.segments.append(seg)
-            # Ordet räknas från när det sades, inte när transkriberingen blev klar.
-            self.engine.add_text(text, now=received_at)
-            self.words_since_topics += len(tokenize(text))
+            self.words_since_topics += len(_WORD_RE.findall(text))
             await self.broadcast({
                 "type": "update",
                 "segment": text,
@@ -156,8 +150,8 @@ class Session:
     async def ticker(self) -> None:
         """Skicka vikter regelbundet så att molnet avklingar även i tystnad."""
         while True:
-            await asyncio.sleep(self.cfg.keywords.tick_seconds)
-            if self.clients and (self.engine.terms or self.topics.topics):
+            await asyncio.sleep(self.cfg.topics.tick_seconds)
+            if self.clients and self.topics.topics:
                 await self.broadcast({"type": "terms", "terms": self.cloud_terms(), "llm": self.topics.info()})
 
     async def topic_loop(self) -> None:
@@ -210,7 +204,6 @@ async def export(request):
         ],
         "transcript": " ".join(s.text for s in session.segments),
         "top": session.cloud_terms(now=now),
-        "keywords": session.engine.snapshot(now=now),
         "topics": [
             {"label": t.label, "score": round(t.score, 4), "keywords": t.keywords}
             for t in session.topics.current(now)

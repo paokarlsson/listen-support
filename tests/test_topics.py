@@ -5,10 +5,7 @@ import httpx
 import pytest
 
 from app.config import TopicConfig
-from app.keywords import KeywordEngine
-from app.config import KeywordConfig
-from app.merge import merge
-from app.topics import TOOL_NAME, Topic, TopicLayer
+from app.topics import TOOL_NAME, TopicLayer
 
 
 def tool_response(topics, usage=(1200, 80)):
@@ -135,23 +132,39 @@ def test_disabling_clears_topics():
     assert layer.current() == []
 
 
-def test_merge_topics_dominate_and_cover_keywords():
-    eng = KeywordEngine(KeywordConfig(), clock=lambda: 0)
-    eng.add_text("budgeten budgeten budgeten hyresvärden hyresvärden flytten")
-    keywords = eng.top()
-    topics = [Topic("Budget", 0.66, 0, ["budgeten", "kostnad"]), Topic("Kontorsflytten", 1.0, 0, ["flytten"])]
-    rows = merge(keywords, topics, TopicConfig(), 40, eng.stem)
-    assert rows[0] == {"text": "Kontorsflytten", "weight": 1.0, "kind": "topic"}
-    assert rows[1]["text"] == "Budget" and rows[1]["kind"] == "topic"
+def test_cloud_terms_topics_largest_and_keywords_grouped():
+    layer, _ = layer_with(lambda r: None, keyword_factor=0.5)
+    layer.apply([
+        {"label": "Kontorsflytten", "weight": 1.0, "keywords": ["flytten", "nya kontoret"]},
+        {"label": "Budget", "weight": 0.6, "keywords": ["budgeten", "flytten"]},
+    ], 1000)
+    rows = layer.cloud_terms()
+    assert rows[0] == {"text": "Kontorsflytten", "weight": 1.0, "kind": "topic", "topic": "Kontorsflytten"}
+    assert rows[1]["text"] == "Budget" and rows[1]["weight"] == pytest.approx(0.6)
     by_text = {r["text"]: r for r in rows}
-    # "budgeten" ingår i Budget → nedtonad under det fristående "hyresvärden"
-    assert by_text["budgeten"]["weight"] < by_text["hyresvärden"]["weight"]
-    assert all(r["kind"] == "keyword" for r in rows[2:])
+    # "flytten" finns i båda ämnena: hamnar hos det starkaste
+    assert by_text["flytten"] == {"text": "flytten", "weight": 0.5, "kind": "keyword", "topic": "Kontorsflytten"}
+    assert by_text["budgeten"]["topic"] == "Budget"
+    assert by_text["budgeten"]["weight"] == pytest.approx(0.3)
+    assert len(rows) == 5
 
 
-def test_merge_without_topics_is_keywords_only():
-    eng = KeywordEngine(KeywordConfig(), clock=lambda: 0)
-    eng.add_text("budgeten budgeten flytten")
-    rows = merge(eng.top(), [], TopicConfig(), 40, eng.stem)
-    assert rows == [{"text": "budgeten", "weight": 1.0, "kind": "keyword"},
-                    {"text": "flytten", "weight": 0.5, "kind": "keyword"}]
+def test_cloud_terms_respects_max_words_and_show_keywords():
+    layer, _ = layer_with(lambda r: None, show_keywords=False)
+    layer.apply([{"label": "Budget", "weight": 0.4, "keywords": ["budgeten"]},
+                 {"label": "Semestern", "weight": 0.8, "keywords": ["gotland"]}], 1000)
+    assert [r["text"] for r in layer.cloud_terms()] == ["Semestern", "Budget"]
+    assert layer.cloud_terms()[0]["weight"] == 1.0
+    assert len(layer.cloud_terms(max_words=1)) == 1
+    layer.set_enabled(False)
+    assert layer.cloud_terms() == []
+
+
+def test_set_half_life_keeps_current_scores():
+    layer, clock = layer_with(lambda r: None, half_life_seconds=100)
+    layer.apply([{"label": "Budget", "weight": 1.0, "keywords": []}], 1000)
+    clock["t"] = 1100
+    layer.set_half_life(10)
+    assert layer.current()[0].score == pytest.approx(0.5)
+    clock["t"] = 1110
+    assert layer.current()[0].score == pytest.approx(0.25)

@@ -1,18 +1,17 @@
 # Talmoln 🎙️☁️
 
-Ett levande ordmoln av det du pratar om. Du pratar, telefonen lyssnar. Ord och ämnen som återkommer växer i molnet, och det som inte nämns på ett tag krymper.
+Ett levande ordmoln av det du pratar om. Du pratar, telefonen lyssnar. Ämnen som återkommer växer i molnet, och det som inte nämns på ett tag krymper.
 
-Allt körs **lokalt på telefonen**: en Python-server i Termux och en webbsida i Chrome på `localhost`. Inget ljud lämnar enheten. Ett valfritt ämneslager skickar transkriberad **text** (aldrig ljud) till Claude API för att förstå vad samtalet handlar om.
+Ljudet stannar **på telefonen**: en Python-server i Termux transkriberar lokalt med Whisper, och en webbsida i Chrome på `localhost` visar molnet. Transkriberad **text** (aldrig ljud) skickas till Claude API, som avgör vad samtalet handlar om. Molnet kommer helt från Claude: utan API-nyckel eller nät visas bara transkriptet.
 
 ---
 
 ## 1. Vad det gör
 
 - **Live-transkribering** av tal (svenska i första hand) med Whisper (whisper.cpp).
-- **Nyckelordsextraktion** som plockar ut vad samtalet handlar om, inte bara vilka ord som är vanligast.
-- **Ordmoln i webbläsaren** som uppdateras i realtid. Ordets storlek motsvarar hur viktigt ämnet är just nu.
+- **Ämnen med Claude**: slår ihop synonymer och böjningar till ämnen ("bil", "körde", "parkering" → *Transport*) och ger dem begripliga namn.
+- **Ordmoln i webbläsaren**: ämnesnamnen är de stora orden och ämnenas ord ligger runt omkring i samma färg. Storleken motsvarar hur mycket det pratas om ämnet just nu.
 - **Tidsavklingning**: gamla ämnen tonar ut så att molnet visar det som pågår nu, inte bara totalsumman.
-- **Ämnesförståelse med Claude**: slår ihop synonymer och böjningar till ämnen ("bil", "körde", "parkering" → *Transport*) och ger dem begripliga namn.
 
 ### Inte i scope (just nu)
 - Talaridentifiering (vem som säger vad)
@@ -34,21 +33,11 @@ Allt körs **lokalt på telefonen**: en Python-server i Termux och en webbsida i
 │  │                          │          │   ↓ (var ~6 s)   │  │
 │  │                          │          │ Whisper (lokalt) │  │
 │  │                          │          │   ↓ text         │  │
-│  │                          │          │ Nyckelordsmotor  │  │
-│  │ Ordmoln (DOM)       ◄────┼──────────┤   ↓ vikter       │  │
-│  │ Löpande transkript       │   JSON   │ Ämneslager ──────┼──┼──► Claude API
-│  └──────────────────────────┘          └──────────────────┘  │   (text, var 30–60 s)
+│  │ Löpande transkript  ◄────┼──────────┤ Ämneslager ──────┼──┼──► Claude API
+│  │ Ordmoln (DOM)       ◄────┼──────────┤   ↓ ämnen+vikter │  │   (text, var ~20 s)
+│  └──────────────────────────┘   JSON   └──────────────────┘  │
 └──────────────────────────────────────────────────────────────┘
 ```
-
-### Två lager
-
-| Lager | Hur ofta | Vad det gör | Kräver nät |
-|---|---|---|---|
-| **Snabbt** (lokalt) | var ~6 s | Whisper → ordräkning med avklingning. Molnet reagerar direkt. | Nej |
-| **Smart** (Claude) | var 45 s (inställbart) | Läser senaste minuternas transkript och returnerar ämnen med vikter. | Ja |
-
-Molnet slår ihop båda: **ämnen** från Claude blir de stora orden (i en egen gul färg) och **enskilda nyckelord** från det snabba lagret fyller ut. Utan API-nyckel eller nät fungerar appen ändå, men då bara med det snabba lagret.
 
 **Varför fånga ljudet i webbläsaren?** Chrome tillåter mikrofon på `localhost` (räknas som säker kontext), och det är mycket enklare än att läsa mikrofonen från Termux. Webbsidan skickar rå **16 kHz mono PCM**, vilket är precis det Whisper vill ha. Då behövs ingen ffmpeg-avkodning på servern.
 
@@ -72,7 +61,6 @@ Molnet slår ihop båda: **ämnen** från Claude blir de stora orden (i en egen 
 | Webbserver | **Starlette + Uvicorn** | Ren Python och fungerar i Termux utan att Rust-beroenden (pydantic-core) behöver kompileras. WebSocket-stöd ingår. |
 | Speech-to-text | **whisper.cpp** via `pywhispercpp` | Byggs med clang/cmake i Termux och är snabbt på ARM-CPU. Reservplan: `backend = "cli"` anropar en manuellt byggd `whisper-cli`. |
 | Modell | `base` eller `small` (ggml), gärna **KB-Whisper** | KBLabs svenska finjustering ger klart bättre svenska. `tiny` är snabbast men sämst. |
-| Nyckelord | Egen motor: stoppord + `snowballstemmer` (svensk) + viktad frekvens med avklingning | Ren Python, lätt och fullt kontrollerbar. Se avsnitt 5. |
 | Ämneslager | **Claude API** (`claude-haiku-5-5` som standard) anropat direkt med `httpx` | Snabb och billig modell som klarar svenska bra. Vi använder inte `anthropic`-SDK:n eftersom den drar in pydantic-core (Rust), som är jobbigt att bygga i Termux. Ett rent HTTP-anrop räcker. |
 | Frontend | Vanilla JS, egen ordmolnsrenderare (`cloud.js`) | Inget byggsteg, fungerar offline. Se nedan. |
 
@@ -98,11 +86,7 @@ Molnet slår ihop båda: **ämnen** från Claude blir de stora orden (i en egen 
 │   ├── config.py             # läser config.toml
 │   ├── audio.py              # PCM-buffert, chunkning vid tystnad, energibaserad VAD
 │   ├── transcriber.py        # whisper.cpp (pywhispercpp), whisper-cli eller stub
-│   ├── keywords.py           # nyckelordsmotor (snabba lagret)
-│   ├── topics.py             # ämneslager: anropar Claude, tolkar svaret
-│   ├── merge.py              # slår ihop ämnen + nyckelord till en vikttabell
-│   ├── stopwords_sv.txt      # stoppord inkl. talspråk
-│   └── weakwords_sv.txt      # ord som bara visas i bigram ("nya kontoret")
+│   └── topics.py             # ämneslager: anropar Claude, tolkar svaret, bygger molnet
 ├── static/
 │   ├── index.html
 │   ├── app.js                # mic → worklet → websocket, rendering, inställningar
@@ -110,41 +94,16 @@ Molnet slår ihop båda: **ämnen** från Claude blir de stora orden (i en egen 
 │   ├── pcm-worklet.js        # AudioWorkletProcessor: float32 → int16 @16 kHz
 │   └── style.css
 └── tests/
-    ├── test_keywords.py
     ├── test_audio.py
-    ├── test_topics.py        # ämneslager och sammanslagning, med låtsas-API
+    ├── test_topics.py        # ämneslagret, med låtsas-API
     └── test_server.py
 ```
 
 ---
 
-## 5. Nyckelordsmotorn
+## 5. Ämneslagret (Claude)
 
-För varje ny transkriberad bit text:
-
-1. **Normalisera**: gemener, ta bort skiljetecken och siffror. Texten delas vid skiljetecken så att bigram inte bildas över meningsgränser.
-2. **Filtrera** bort stoppord ("och", "att", "det", "som", "liksom", "typ", "alltså", "eh" …, se `stopwords_sv.txt`) och ord kortare än 3 tecken.
-3. **Stamma** med svensk Snowball, så att "budgeten", "budgetar" och "budget" räknas som samma begrepp. Molnet visar den **vanligaste ytformen**, inte stammen.
-4. **Bigram**: två innehållsord i rad (t.ex. "nya kontoret") räknas som ett eget begrepp när de nått `bigram_min_count` förekomster. Ett enskilt ord som nästan bara förekommer inuti ett visat bigram döljs, så att begreppet inte syns två gånger.
-   **Svaga ord** (`weakwords_sv.txt`: "nya", "stora", "prata" …) får ingå i bigram men visas aldrig ensamma.
-5. **Poängsätt** med tidsavklingning:
-
-   ```
-   score(term) = Σ  exp(-ln2 · (nu - t_i) / halveringstid)
-                för varje förekomst i
-   ```
-
-   Summan hålls inkrementellt (poängen skrivs ned sedan förra uppdateringen, sedan läggs +1 till), vilket är exakt samma sak. Förekomsten räknas från när biten spelades in, inte när transkriberingen blev klar. Standard för halveringstid: 120 s. Termer under `forget_below` glöms helt.
-6. **Skicka topp-N** (standard 40) med normaliserade vikter 0–1 till klienten, vid varje ny bit och var 2:a sekund så att molnet krymper även i tystnad.
-
-### Senare förbättringar
-- Lemmatisering istället för stamning (t.ex. Stanza), om det går att köra på telefonen. Snowball stammar ibland olika böjningar olika ("kontoret" → `kontor`, "kontor" → `kont`).
-
----
-
-## 5b. Ämneslagret (Claude)
-
-**När:** var 45:e sekund (inställbart 15–300 s i appen) och bara om minst 40 nya ord har transkriberats sedan förra anropet. Tystnad ger alltså inga anrop.
+**När:** så fort minst 20 ord har transkriberats, sedan som tätast var 20:e sekund (inställbart 10–120 s i appen) och bara om minst 20 nya ord har kommit sedan förra anropet. Tystnad ger alltså inga anrop.
 
 **Indata till Claude:**
 - De senaste 3 minuternas transkript (glidande fönster, högst 8000 tecken)
@@ -165,15 +124,21 @@ Om du byter `model` i `config.toml` till Opus 5.5 eller Sonnet 5.5 behöver `too
 
 Systemprompten finns i `app/topics.py` (`SYSTEM_PROMPT`) och följer utkastet: 3–8 ämnen, korta svenska namn, vikt efter senaste avsnittet, återanvänd namn, hitta inte på.
 
-**Sammanslagning (`merge.py`):**
-- Ämnen räknas i full skala och nyckelord skalas ned (`keyword_scale` = 0.6), så att ämnena blir de stora orden. Ämnen visas i en egen färg.
-- Nyckelord som redan ingår i ett ämne (samma stam som ämnets namn eller ord) tonas ned ytterligare (`covered_keyword_factor` = 0.35), så att samma sak inte syns dubbelt.
-- Ämnesvikter avklingar mellan anropen med samma formel som nyckelorden. Ett nytt svar blandas 50/50 med den avklingade gamla vikten, så molnet ändras mjukt.
+**Molnet (`TopicLayer.cloud_terms`):**
+- Ämnesnamnen är de stora orden. Ämnenas ord från Claude visas runt omkring i samma färg som sitt ämne, i storlek `keyword_factor` (0,45) av ämnets. Sätt `show_keywords = false` för att bara visa ämnesnamnen.
+- Ett ord som Claude lägger under flera ämnen visas en gång, hos det starkaste.
+- Ämnesvikter avklingar mellan anropen:
+
+  ```
+  vikt(t) = vikt(t0) · exp(-ln2 · (t - t0) / halveringstid)      halveringstid = 120 s
+  ```
+
+  Ett nytt svar blandas 50/50 med den avklingade gamla vikten, så molnet ändras mjukt. Servern skickar avklingade vikter varannan sekund även när inget nytt sägs.
 - **Ämnesstabilitet:** om Claude ändå döper om ett ämne men nyckelorden i stort sett är desamma (Jaccard ≥ 0,5) behåller servern det gamla namnet.
 
 **Felhantering:** timeout på 15 s. Vid fel behålls senaste ämnen, de avklingar och ett nytt försök görs vid nästa intervall. Inget nät eller timeout ger status `offline`. HTTP-fel som 429 och 5xx, avböjda förfrågningar och svar utan verktygsanrop ger `error`. Inget undantag lämnar `topics.py`, så appen kraschar aldrig på grund av API:t.
 
-**Kostnad:** ett anrop per ~45 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Loggen visar tokens per anrop och totalt för sessionen, och samma siffror syns i inställningarna och i exporten.
+**Kostnad:** som mest ett anrop per ~20 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Loggen visar tokens per anrop och totalt för sessionen, och samma siffror syns i inställningarna och i exporten.
 
 **Integritet:** knappen *Ämnen* i sidhuvudet öppnar inställningarna, där lagret slås av och på. När det slås av tas Claudes ämnen bort ur molnet direkt, och ett svar som kommer under tiden slängs. Startläget styrs av `topics.enabled` i `config.toml`.
 
@@ -200,9 +165,9 @@ Systemprompten finns i `app/topics.py` (`SYSTEM_PROMPT`) och följer utkastet: 3
   "type": "update",
   "segment": "vi måste prata om budgeten för nya kontoret",
   "terms": [
-    { "text": "Kontorsflytten", "weight": 1.0, "kind": "topic" },
-    { "text": "Budget", "weight": 0.66, "kind": "topic" },
-    { "text": "hyresvärden", "weight": 0.38, "kind": "keyword" }
+    { "text": "Kontorsflytten", "weight": 1.0, "kind": "topic", "topic": "Kontorsflytten" },
+    { "text": "Budget", "weight": 0.66, "kind": "topic", "topic": "Budget" },
+    { "text": "hyresvärden", "weight": 0.45, "kind": "keyword", "topic": "Kontorsflytten" }
   ],
   "llm": { "status": "ok", "last_update_s": 12, "enabled": true, "has_key": true,
            "model": "claude-haiku-5-5", "busy": false, "usage": { "calls": 4, "input_tokens": 5210, "output_tokens": 640, "failed": 0 } },
@@ -219,7 +184,7 @@ Systemprompten finns i `app/topics.py` (`SYSTEM_PROMPT`) och följer utkastet: 3
 
 | Meddelande | Effekt |
 |---|---|
-| `{"type": "settings", "half_life": 60, "top_n": 30}` | Ändra halveringstid/antal ord (gäller alla klienter) |
+| `{"type": "settings", "half_life": 60, "top_n": 30}` | Ändra ämnenas halveringstid/max antal ord i molnet (gäller alla klienter) |
 | `{"type": "settings", "llm_enabled": false, "llm_interval": 60}` | Slå av/på ämneslagret, ändra intervallet |
 | `{"type": "stop"}` | Mikrofonen stängdes – transkribera det som är kvar i bufferten |
 
@@ -247,7 +212,7 @@ pip install -r requirements.txt
 ./scripts/download_model.sh base        # eller kb-base / kb-small för bättre svenska
 #    …och kontrollera transcriber.model_path i config.toml
 
-# 5. API-nyckel för ämneslagret (valfritt)
+# 5. API-nyckel (krävs för ordmolnet)
 cp .env.example .env
 nano .env          # klistra in ANTHROPIC_API_KEY=...
 
@@ -299,7 +264,7 @@ Utan modell startar servern ändå, i stub-läge, och sidan visar en varning. S�
 
 - [x] **Fas 1 – Skelett:** server + webbsida, mikrofon → PCM → WebSocket, eko av byte-mängd
 - [x] **Fas 2 – Transkribering:** whisper.cpp kopplat, löpande transkript visas
-- [x] **Fas 3 – Ordmoln:** nyckelordsmotor + live-ordmoln med avklingning
+- [x] **Fas 3 – Ordmoln:** live-ordmoln med avklingning (den lokala nyckelordsmotorn är borttagen – molnet kommer från ämneslagret)
 - [x] **Fas 4 – Ämneslager:** Claude-anrop, sammanslagning, statusindikator, felhantering
 - [x] **Fas 5 – Finputs:** reglage för halveringstid/topp-N/LLM-intervall, reset, export, mjuka animationer
 - [ ] **Fas 6 – Offline-läge (valfritt):** lokal LLM via llama.cpp som ersättning för Claude
@@ -310,6 +275,7 @@ Utan modell startar servern ändå, i stub-läge, och sidan visar en varning. S�
 
 - **Bygget av whisper.cpp i Termux** är det största osäkerhetsmomentet. Reservplan finns: `backend = "cli"`.
 - **Whisper och korta bitar:** ord kan klippas mitt i vid gränserna. Vi klipper vid första paus efter målängden och skickar förra bitens slut som prompt. Om Whisper börjar upprepa sig: sätt `use_prompt = false`.
-- **Stoppordslistan** behöver tunas för talspråk, eftersom talad svenska har mycket fler utfyllnadsord än skriven. Redigera `app/stopwords_sv.txt` och `app/weakwords_sv.txt` – de läses vid start.
+- **Molnet kräver nät:** utan API-nyckel eller uppkoppling visas bara transkriptet. Fas 6 (lokal LLM) skulle ta bort det beroendet.
+- **Fördröjning:** första ämnena dyker upp efter ~20 ord plus svarstiden från Claude, alltså några sekunder efter att du börjat prata – inte direkt.
 - **Ämnesstabilitet:** om Claude döper om samma ämne mellan anropen hoppar molnet. Vi skickar med föregående lista och ber om återanvändning, och servern matchar dessutom namn mot nyckelord.
 - **Integritet:** transkriberad text skickas till Anthropic när ämneslagret är på. Av/på finns i inställningarna och indikatorn i sidhuvudet visar läget.
