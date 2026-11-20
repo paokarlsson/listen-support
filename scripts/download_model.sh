@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 # Laddar ner en ggml-modell till models/.
 #
-#   ./scripts/download_model.sh base       # whisper.cpp base   (~150 MB)
-#   ./scripts/download_model.sh small      # whisper.cpp small  (~490 MB)
-#   ./scripts/download_model.sh kb-base    # KB-Whisper base, bättre svenska
-#   ./scripts/download_model.sh kb-small   # KB-Whisper small, bäst svenska av dessa
+#   ./scripts/download_model.sh            # = kb-base (standard)
+#   ./scripts/download_model.sh kb-base    # KB-Whisper base: bra svenska, liten och snabb (standard)
+#   ./scripts/download_model.sh kb-small   # KB-Whisper small: ännu bättre svenska, tyngre
+#   ./scripts/download_model.sh base       # whisper.cpp base (flerspråkig, sämre svenska)
+#   ./scripts/download_model.sh small      # whisper.cpp small
 #
-# Kontrollera filnamnet i config.toml (transcriber.model_path) efteråt.
+# KB-Whisper sparas alltid som models/kb-whisper-<storlek>.bin, oavsett vilken
+# variant som fanns i KBLabs repo, så att config.toml inte behöver ändras.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 mkdir -p models
 
-name="${1:-base}"
+name="${1:-kb-base}"
+repo="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 case "$name" in
   tiny|base|small|medium)
-    url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${name}.bin"
+    urls=("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${name}.bin")
     out="models/ggml-${name}.bin" ;;
-  kb-base|kb-small|kb-medium)
+  kb-tiny|kb-base|kb-small|kb-medium)
     size="${name#kb-}"
-    # KBLab publicerar ggml-filer i sina kb-whisper-repon. Om filnamnet har
-    # ändrats: se https://huggingface.co/KBLab/kb-whisper-${size}/tree/main
-    url="https://huggingface.co/KBLab/kb-whisper-${size}/resolve/main/ggml-model-q5_0.bin"
-    out="models/kb-whisper-${size}-q5_0.bin" ;;
+    repo="https://huggingface.co/KBLab/kb-whisper-${size}/resolve/main"
+    # KBLab publicerar whisper.cpp-filer i sina repon. Filnamnet har inte gått att
+    # verifiera härifrån, så vi provar de troliga i tur och ordning.
+    urls=("$repo/ggml-model-q5_0.bin" "$repo/ggml-model.bin" "$repo/ggml-model-q8_0.bin")
+    out="models/kb-whisper-${size}.bin" ;;
   *)
-    echo "Okänd modell: $name (välj tiny, base, small, medium, kb-base, kb-small, kb-medium)" >&2
+    echo "Okänd modell: $name (välj kb-base, kb-small, kb-medium, kb-tiny, tiny, base, small, medium)" >&2
     exit 1 ;;
 esac
 
@@ -33,9 +37,19 @@ if [ -f "$out" ]; then
   exit 0
 fi
 
-echo "Laddar ner $url"
-curl -L --fail --progress-bar -o "$out.part" "$url"
-mv "$out.part" "$out"
-echo
-echo "Klart: $out"
-echo "Sätt i config.toml:  model_path = \"$out\""
+for url in "${urls[@]}"; do
+  echo "Försöker $url"
+  if curl -L --fail --progress-bar -o "$out.part" "$url"; then
+    mv "$out.part" "$out"
+    echo
+    echo "Klart: $out"
+    [ "$out" = "models/kb-whisper-base.bin" ] || echo "Sätt i config.toml:  model_path = \"$out\""
+    exit 0
+  fi
+  rm -f "$out.part"
+done
+
+echo >&2
+echo "Hittade ingen ggml-fil. Kolla filnamnen på ${repo%/resolve/main}/tree/main," >&2
+echo "ladda ner whisper.cpp-filen för hand och spara den som $out." >&2
+exit 1

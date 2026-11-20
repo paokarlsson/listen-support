@@ -140,7 +140,7 @@ def _resolve_model(path: str) -> Path:
         p = ROOT / p
     if not p.exists():
         raise FileNotFoundError(
-            f"Hittar ingen modell på {p}. Ladda ner en med scripts/download_model.sh "
+            f"Hittar ingen modell på {p}. Ladda ner KB-Whisper base med ./scripts/download_model.sh "
             f"eller ändra transcriber.model_path i config.toml."
         )
     return p

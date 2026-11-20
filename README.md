@@ -75,7 +75,7 @@ Nätet behövs bara en gång vid installationen: `pkg`, `pip`, `git clone` och n
 |---|---|---|
 | Webbserver | **Starlette + Uvicorn** | Ren Python och fungerar i Termux utan att Rust-beroenden (pydantic-core) behöver kompileras. WebSocket-stöd ingår. |
 | Speech-to-text | **whisper.cpp** via `pywhispercpp` | Byggs med clang/cmake i Termux och är snabbt på ARM-CPU. Reservplan: `backend = "cli"` anropar en manuellt byggd `whisper-cli`. |
-| Modell | **`base`** (whisper.cpp, `ggml-base.bin`, ~150 MB) | Standardvalet: enkelt att ladda ner, går nära realtid på en vanlig telefon och räcker för att Claude ska hitta ämnena, eftersom enstaka felhörda ord inte spelar så stor roll. `tiny` är snabbare men för dålig på svenska. `small` eller KB-Whisper ger bättre svenska men är tyngre (se `scripts/download_model.sh`). |
+| Modell | **KB-Whisper `base`** (ggml, sparas som `models/kb-whisper-base.bin`) | KBLabs (Kungliga bibliotekets) svenska finjustering av Whisper. Klart bättre svenska än OpenAI:s `base` i samma storlek, så den är lika snabb på telefonen. `kb-small` ger ännu bättre svenska men är tyngre; vanliga `base` finns kvar som reserv (se `scripts/download_model.sh`). |
 | Ämneslager | **Claude API** (`claude-haiku-5-5` som standard) anropat direkt med `httpx` | Snabb och billig modell som klarar svenska bra. Vi använder inte `anthropic`-SDK:n eftersom den drar in pydantic-core (Rust), som är jobbigt att bygga i Termux. Ett rent HTTP-anrop räcker. |
 | Frontend | Vanilla JS, egen ordmolnsrenderare (`cloud.js`) | Inget byggsteg, fungerar offline. Se nedan. |
 
@@ -224,8 +224,8 @@ cd talmoln
 # 3. Python-beroenden (bygger whisper.cpp, tar några minuter)
 pip install -r requirements.txt
 
-# 4. Ladda ner Whisper-modellen (base, ~150 MB – redan vald i config.toml)
-./scripts/download_model.sh base
+# 4. Ladda ner Whisper-modellen (KB-Whisper base – redan vald i config.toml)
+./scripts/download_model.sh
 #    …och kontrollera transcriber.model_path i config.toml
 
 # 5. API-nyckel (krävs för ordmolnet)

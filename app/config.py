@@ -17,7 +17,7 @@ class ServerConfig:
 @dataclass
 class TranscriberConfig:
     backend: str = "whispercpp"  # whispercpp | cli | stub
-    model_path: str = "models/ggml-base.bin"
+    model_path: str = "models/kb-whisper-base.bin"
     language: str = "sv"
     threads: int = 4
     cli_binary: str = "whisper-cli"
