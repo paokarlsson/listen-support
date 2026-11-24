@@ -8,7 +8,7 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 
 ## Kom igång
 
-1. **Slå på GitHub Pages:** på GitHub, gå till repot → **Settings** → **Pages**. Under *Build and deployment*, välj *Source* **Deploy from a branch**, grenen `ccr-a5a1c1f9-s7n6r9` och mappen **`/docs`**, och tryck **Save**. Efter någon minut ligger sidan på **https://paokarlsson.github.io/listen-support/**.
+1. **Slå på GitHub Pages:** på GitHub, gå till repot → **Settings** → **Pages**. Under *Build and deployment*, välj *Source* **Deploy from a branch**, grenen **`main`** och mappen **`/docs`**, och tryck **Save**. Efter någon minut ligger sidan på **https://paokarlsson.github.io/listen-support/**.
 2. **Öppna sidan i Chrome på telefonen**, tryck på ⚙️ och klistra in din Anthropic API-nyckel. Tryck **Testa** för att kontrollera den. Nyckeln skapar du på console.anthropic.com under *API Keys*.
 3. **Tryck på 🎙️** och tillåt mikrofonen. Första gången laddas Whisper-modellen ner, med en förloppsindikator. Sedan finns den kvar i webbläsaren.
 
