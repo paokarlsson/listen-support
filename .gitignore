@@ -1,8 +1,2 @@
-models/*
-!models/.gitkeep
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-exports/
 .env
+node_modules/

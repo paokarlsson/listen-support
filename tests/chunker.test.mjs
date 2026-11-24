@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Chunker, cleanText, countWords, SAMPLE_RATE } from '../../docs/chunker.js';
+import { Chunker, cleanText, countWords, SAMPLE_RATE } from '../docs/chunker.js';
 
 const tone = (s, amp = 0.25) => Float32Array.from({ length: Math.round(s * SAMPLE_RATE) }, (_, i) => amp * Math.sin(2 * Math.PI * 220 * i / SAMPLE_RATE));
 const silence = (s) => new Float32Array(Math.round(s * SAMPLE_RATE));

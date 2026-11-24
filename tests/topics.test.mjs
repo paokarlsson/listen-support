@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TopicLayer, TOOL_NAME, API_URL } from '../../docs/topics.js';
+import { TopicLayer, TOOL_NAME, API_URL } from '../docs/topics.js';
 
 const toolResponse = (topics, usage = [1200, 80]) => ({
   content: [{ type: 'tool_use', id: 't', name: TOOL_NAME, input: { topics } }],
