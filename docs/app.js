@@ -333,7 +333,6 @@ async function openAudio() {
     state.lastAudioAt = Date.now() / 1000;
     if (data.level > 0) state.lastSoundAt = state.lastAudioAt;
     for (const chunk of state.chunker.feed(data.pcm)) if (chunk.voiced) enqueue(chunk);
-    $('level').style.width = `${Math.min(100, Math.sqrt(data.level) * 180)}%`;
   };
   // Noden måste vara kopplad till grafen för att köras; tyst förstärkare till högtalaren.
   const mute = ctx.createGain();
@@ -417,7 +416,6 @@ async function stopMic() {
   if (rest?.voiced) enqueue(rest);
   setMicButton();
   renderSummaries();
-  $('level').style.width = '0';
   state.wakeLock?.release().catch(() => {});
   state.wakeLock = null;
   setStatus();
@@ -471,44 +469,28 @@ function setMicButton() {
   $('mic-icon').setAttribute('href', on ? '#i-stop' : '#i-mic');
 }
 
+/** Enkel tid för människor: "nyss", "för 1 minut sedan", "för 5 minuter sedan". */
 function ago(seconds) {
-  if (seconds < 15) return 'nyss';
-  if (seconds < 90) return `för ${Math.round(seconds / 5) * 5} sekunder sedan`;
-  return `för ${Math.round(seconds / 60)} minuter sedan`;
+  if (seconds < 45) return 'nyss';
+  const min = Math.max(1, Math.round(seconds / 60));
+  return min === 1 ? 'för 1 minut sedan' : `för ${min} minuter sedan`;
 }
 
-let shownNow = '';
 function renderSummaries() {
   const nowS = Date.now() / 1000;
-  const card = $('now-card');
-  const now = topics.now;
-  card.classList.toggle('waiting', !now);
-  if (!now) {
-    const waiting = state.recording
-      ? 'Lyssnar. Efter några meningar står det här vad samtalet handlar om.'
-      : 'Tryck på Starta och börja prata. Efter några meningar står det här vad samtalet handlar om.';
-    if (shownNow !== waiting) { shownNow = waiting; $('now-text').textContent = waiting; }
-    $('now-age').textContent = '';
-    card.classList.remove('stale');
-  } else {
-    if (now.text !== shownNow) {
-      shownNow = now.text;
-      $('now-text').textContent = now.text;
-      card.classList.remove('fresh');
-      void card.offsetWidth; // starta om animationen
-      card.classList.add('fresh');
-    }
-    const age = nowS - now.at;
-    $('now-age').textContent = `Uppdaterat ${ago(age)}`;
-    card.classList.toggle('stale', age > 90);
-  }
   renderTopics(nowS);
+  const empty = !$('topic-list').childElementCount;
+  $('topics-empty').hidden = !empty;
+  if (empty) {
+    $('topics-empty').textContent = state.recording
+      ? 'Lyssnar. Efter några meningar visas ämnena här.'
+      : 'Tryck på Starta och börja prata. Efter några meningar visas ämnena här.';
+  }
 }
 
 function topicWhen(t, nowS) {
   if (t.active) return null; // visas som märket "Pratas om nu"
-  const since = nowS - t.lastMentioned;
-  return since < 60 ? 'Nämndes nyss' : `Nämndes ${ago(since)}`;
+  return `Nämndes ${ago(nowS - t.lastMentioned)}`;
 }
 
 /** Ämneskorten: nyaste ämnet överst. Byggs bara om när något har ändrats. */
@@ -537,6 +519,8 @@ function renderTopics(nowS = Date.now() / 1000) {
     if (t.summary) li.append(Object.assign(document.createElement('p'), { className: 't-summary', textContent: t.summary }));
     return li;
   }));
+  const fresh = view.filter((t) => knownTopics.size && !knownTopics.has(t.label));
+  if (fresh.length) $('announcer').textContent = fresh.map((t) => `Nytt ämne: ${t.label}. ${t.summary}`).join(' ');
   knownTopics = seen.size ? seen : knownTopics;
 }
 
@@ -559,12 +543,12 @@ function setStatus() {
 
 function updateInfo() {
   const parts = [];
-  if (state.lastLatency != null) parts.push(`${(state.lastLatency / 1000).toFixed(1)} s`);
+  if (state.lastLatency != null) parts.push(`Det tar ${(state.lastLatency / 1000).toFixed(1).replace('.', ',')} s att skriva ut det som sägs`);
   const backlog = state.queue.length + (state.busy ? 1 : 0);
-  if (backlog > 1) parts.push(`kö ${backlog}`);
+  if (backlog > 1) parts.push(`${backlog} bitar väntar`);
   const busyFor = state.busy ? Date.now() / 1000 - state.busySince : 0;
   if (busyFor > 3) parts.push(`skriver… ${Math.round(busyFor)} s`);
-  $('info').textContent = parts.join(' · ');
+  $('info').textContent = parts.join('. ');
   if (state.slowChunks >= 3 && state.asr.status === 'ready' && !settings.model.includes('tiny')
       && state.chunker.cfg.chunkSeconds >= MAX_CHUNK_S) {
     showWarning('Telefonen hinner inte transkribera i realtid. Välj KB-Whisper tiny under Inställningar.');
@@ -649,8 +633,6 @@ function applySettingsToUi() {
   $('llm-interval').value = settings.interval;
   $('llm-interval-out').textContent = `${settings.interval} s`;
   $('asr-model').value = settings.model;
-  $('show-transcript').checked = settings.showTranscript;
-  document.body.classList.toggle('no-transcript', !settings.showTranscript);
   $('show-summaries').checked = settings.showSummaries;
   document.body.classList.toggle('no-summaries', !settings.showSummaries);
   $('api-key').value = topics.apiKey;
@@ -711,11 +693,6 @@ $('show-summaries').addEventListener('change', (e) => {
   document.body.classList.toggle('no-summaries', !e.target.checked);
 });
 
-$('show-transcript').addEventListener('change', (e) => {
-  settings.showTranscript = e.target.checked;
-  saveSettings();
-  document.body.classList.toggle('no-transcript', !e.target.checked);
-});
 
 function saveKey() {
   const key = $('api-key').value.trim();
@@ -745,6 +722,8 @@ function openSettings() {
   applySettingsToUi();
   $('diag-log').textContent = state.log.slice(-60).join('\n') || '(inget ännu)';
   $('settings').showModal();
+  const said = $('transcript');
+  said.scrollTop = said.scrollHeight; // visa de senaste meningarna
 }
 $('settings-btn').addEventListener('click', openSettings);
 $('llm').addEventListener('click', openSettings);
@@ -788,7 +767,6 @@ $('export').addEventListener('click', () => {
       latency_ms: s.latencyMs,
     })),
     transcript: state.segments.map((s) => s.text).join(' '),
-    now: topics.now?.text || null,
     topics: topics.current(now).map((t) => ({
       label: t.label, summary: t.summary, keywords: t.keywords,
       first_seen: new Date(t.firstSeen * 1000).toISOString(),
@@ -817,4 +795,4 @@ renderLlm();
 renderSummaries();
 setInterval(maybeRefreshTopics, 1000);
 setInterval(watchdog, WATCHDOG_MS);
-setInterval(() => { if (topics.topics.size || topics.now) renderSummaries(); renderLlm(); }, 2000);
+setInterval(() => { if (topics.topics.size) renderSummaries(); renderLlm(); }, 2000);

@@ -30,9 +30,7 @@ Du hjälper en person med nedsatt kognitiv förmåga att hänga med i ett samtal
 ett löpande transkript av samtalet på svenska. Det är automatiskt transkriberat och \
 innehåller därför fel.
 
-Svara med:
-- now: en mening som säger vad samtalet handlar om just nu, alltså i det senaste avsnittet.
-- topics: de 1–${maxTopics} ämnen som samtalet handlar om, viktigast först. För varje ämne:
+Svara med topics: de 1–${maxTopics} ämnen som samtalet handlar om, viktigast först. För varje ämne:
   - label: ett kort namn, 1–3 ord.
   - summary: en mening om vad som sägs om ämnet.
   - weight: 0–1, hur mycket det pratas om ämnet i det senaste avsnittet.
@@ -47,8 +45,8 @@ Skriv på lättläst svenska:
 
 Återanvänd namnen från föregående ämneslista när ämnet är detsamma, så att det är lätt \
 att känna igen. Hitta inte på något som inte sägs. Gissa inte när transkriptet är \
-otydligt: hoppa över det. Om det inte går att säga vad samtalet handlar om, låt now \
-vara tom och returnera en tom lista.
+otydligt: hoppa över det, och skriv inte att något är svårt att höra. Om det inte går \
+att säga vad samtalet handlar om, returnera en tom lista.
 
 Svara genom att anropa verktyget report_topics.`;
 
@@ -59,9 +57,8 @@ export const TOOL = {
   input_schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['now', 'topics'],
+    required: ['topics'],
     properties: {
-      now: { type: 'string', description: 'En mening på lättläst svenska: vad samtalet handlar om just nu.' },
       topics: {
         type: 'array',
         description: 'Ämnen, viktigast först.',

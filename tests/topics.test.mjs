@@ -110,7 +110,7 @@ test('byte av halveringstid behåller nuvarande vikter', () => {
   assert.ok(Math.abs(layer.current()[0].score - 0.25) < 1e-9);
 });
 
-test('svaret ger en mening om just nu och en mening per ämne', async () => {
+test('svaret ger en mening per ämne på lättläst svenska', async () => {
   let body;
   const { layer, clock } = layerWith(async (_u, init) => {
     body = JSON.parse(init.body);
@@ -121,10 +121,9 @@ test('svaret ger en mening om just nu och en mening per ämne', async () => {
   });
   await layer.refresh('flytten till nya kontoret blir i mars');
   const schema = body.tools[0].input_schema;
-  assert.deepEqual(schema.required, ['now', 'topics']);
+  assert.deepEqual(schema.required, ['topics']);
   assert.ok(schema.properties.topics.items.required.includes('summary'));
   assert.match(body.system, /lättläst svenska/);
-  assert.deepEqual(layer.now, { text: 'Ni pratar om flytten till nya kontoret.', at: clock.t });
   assert.equal(layer.current()[0].summary, 'Flytten till nya kontoret blir i mars.');
 });
 

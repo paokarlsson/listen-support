@@ -49,7 +49,7 @@
     </symbol>
   </svg>
 
-  <a class="skip-link" href="#now-card">Hoppa till Just nu</a>
+  <a class="skip-link" href="#topics-section">Hoppa till ämnena</a>
 
   <header class="topbar">
     <h1 class="brand"><svg class="icon logo" aria-hidden="true"><use href="#i-logo"/></svg>Talmoln</h1>
@@ -76,34 +76,24 @@
   </div>
 
   <main class="layout">
-    <section id="now-card" class="card now-card" aria-labelledby="now-heading" tabindex="-1">
-      <h2 id="now-heading" class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-live"/></svg>Just nu</h2>
-      <p id="now-text" class="now-text" aria-live="polite">Tryck på <strong>Starta</strong> och börja prata. Efter några meningar står det här vad samtalet handlar om.</p>
-      <p id="now-age" class="now-age"></p>
-    </section>
-
-    <section id="topics-section" class="topics-section" aria-labelledby="topics-heading">
-      <h2 id="topics-heading" class="eyebrow">Ämnen <span class="eyebrow-note">nyaste överst</span></h2>
+    <section id="topics-section" class="topics-section" aria-labelledby="topics-heading" tabindex="-1">
+      <h2 id="topics-heading" class="visually-hidden">Ämnen i samtalet, nyaste överst</h2>
+      <p id="topics-empty" class="empty-hint">Tryck på <strong>Starta</strong> och börja prata. Efter några meningar visas ämnena här.</p>
       <ul id="topic-list" class="topic-list"></ul>
-    </section>
-
-    <section class="transcript-section" aria-labelledby="transcript-heading">
-      <h2 id="transcript-heading" class="eyebrow">Det som sagts</h2>
-      <div id="transcript" class="transcript" role="log" aria-live="off" tabindex="0" aria-labelledby="transcript-heading"></div>
+      <!-- Läser upp nya ämnen för skärmläsare. -->
+      <p id="announcer" class="visually-hidden" aria-live="polite"></p>
     </section>
   </main>
 
   <footer class="bottombar">
-    <div class="meter" aria-hidden="true"><div id="level" class="level"></div></div>
     <div class="controls">
-      <button id="settings-btn" class="btn btn-ghost btn-icon-label" type="button">
+      <button id="settings-btn" class="btn btn-ghost btn-compact" type="button">
         <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Inställningar</span>
       </button>
-      <button id="mic" class="mic" type="button" aria-pressed="false">
-        <svg class="icon icon-lg" aria-hidden="true"><use id="mic-icon" href="#i-mic"/></svg>
+      <button id="mic" class="mic" type="button">
+        <svg class="icon" aria-hidden="true"><use id="mic-icon" href="#i-mic"/></svg>
         <span id="mic-label">Starta</span>
       </button>
-      <p id="info" class="info"></p>
     </div>
   </footer>
 
@@ -115,6 +105,12 @@
           <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
         </button>
       </div>
+
+      <section class="group" aria-labelledby="g-said">
+        <h3 id="g-said">Det som sagts</h3>
+        <div id="transcript" class="transcript" role="log" aria-live="off" tabindex="0" aria-labelledby="g-said"></div>
+        <p id="info" class="help"></p>
+      </section>
 
       <section class="group" aria-labelledby="g-look">
         <h3 id="g-look">Utseende</h3>
@@ -136,7 +132,6 @@
         </label>
         <label class="switch"><input id="reduce-motion" type="checkbox"><span>Minska rörelser</span></label>
         <label class="switch"><input id="show-summaries" type="checkbox" checked><span>Visa förklaringar till ämnena</span></label>
-        <label class="switch"><input id="show-transcript" type="checkbox" checked><span>Visa det som sagts</span></label>
       </section>
 
       <section class="group" aria-labelledby="g-claude">
