@@ -2,6 +2,8 @@
 
 Ett levande ordmoln av det du pratar om. Du pratar, telefonen lyssnar. Ämnen som återkommer växer i molnet, och det som inte nämns på ett tag krymper.
 
+Talmoln är tänkt som ett **stöd för människor med nedsatt kognitiv förmåga**: det visar med korta meningar på lättläst svenska vad samtalet handlar om just nu, så att det blir lättare att hänga med.
+
 Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen, och transkriberad **text** (aldrig ljud) skickas till Claude, som avgör vad samtalet handlar om. Ingen server behövs: sidan ligger på GitHub Pages.
 
 ---
@@ -17,8 +19,9 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 ## Vad det gör
 
 - **Live-transkribering** av svenska med Whisper, i webbläsaren.
-- **Ämnen med Claude**: slår ihop synonymer och böjningar till ämnen ("bil", "körde", "parkering" → *Transport*) och ger dem begripliga namn.
-- **Ordmoln**: ämnesnamnen är de stora orden, och ämnenas ord ligger runt omkring i samma färg. Storleken motsvarar hur mycket det pratas om ämnet just nu.
+- **Just nu**: en mening överst på lättläst svenska om vad samtalet handlar om just nu, till exempel "Ni pratar om var ni ska åka på semester i sommar." Den visar också hur gammal den är.
+- **Ämnen med förklaring**: varje ämne får ett kort namn och en mening om vad som sägs, till exempel *Kontorsflytten – Flytten till nya kontoret blir i mars.*
+- **Ordmoln**: ämnesnamnen, i samma färg som i listan. Storleken motsvarar hur mycket det pratas om ämnet just nu. Ämnenas nyckelord kan visas runt omkring (av som standard, för att hålla det lugnt).
 - **Tidsavklingning**: gamla ämnen tonar ut så att molnet visar det som pågår nu.
 
 Inte i scope: talaridentifiering, konton eller delning, analys av retorik.
@@ -44,7 +47,7 @@ Inte i scope: talaridentifiering, konton eller delning, analys av retorik.
 
 1. `AudioContext({sampleRate: 16000})`: Chrome omsamplar mikrofonen. Om det inte går omsamplar `pcm-worklet.js` själv (linjär interpolation).
 2. Workleten skickar block om 100 ms som float32.
-3. `chunker.js` samlar ljudet. Efter ~6 s väntar den på första tysta ram och klipper där, så att ord inte klipps mitt i. Kommer ingen paus klipps biten vid 9 s i den tystaste punkten.
+3. `chunker.js` samlar ljudet. Efter ~4 s väntar den på första tysta ram och klipper där, så att ord inte klipps mitt i. Kommer ingen paus klipps biten 3 s senare i den tystaste punkten. Hinner telefonen inte med görs bitarna längre (upp till 8 s), och kortare igen när den hinner (ner till 3 s).
 4. Bitar utan tal (energibaserad VAD) hoppas över.
 5. Whisper körs i en Web Worker så att sidan inte hackar. Ligger den efter släpps de äldsta bitarna när fler än 3 väntar.
 6. Kända Whisper-hallucinationer ur tystnad ("Textning.nu", "Tack för att ni tittade" …) filtreras bort.
@@ -65,29 +68,32 @@ Biblioteket är [transformers.js](https://github.com/huggingface/transformers.js
 
 ## Ämneslagret (Claude)
 
-**När:** så fort minst 20 ord har transkriberats, sedan som tätast var 20:e sekund (inställbart 10–120 s) och bara om minst 20 nya ord har kommit sedan förra anropet. Tystnad ger alltså inga anrop.
+**När:** så fort minst 8 ord har transkriberats, sedan som tätast var 10:e sekund (inställbart 5–60 s) och bara om minst 8 nya ord har kommit sedan förra anropet. Tystnad ger alltså inga anrop.
 
-**Indata:** de senaste 3 minuternas transkript (högst 8000 tecken) och föregående ämneslista, så att Claude kan **återanvända samma ämnesnamn** i stället för att hitta på nya varje gång.
+**Indata:** de senaste 2 minuternas transkript (högst 8000 tecken) och föregående ämneslista, så att Claude kan **återanvända samma ämnesnamn** i stället för att hitta på nya varje gång.
 
 **Utdata:** strukturerad JSON via verktyget `report_topics` med `strict: true`. Modellen är `claude-haiku-5-5`, som tillåter ett tvingat verktygsanrop, så svaret är alltid ett anrop som följer schemat:
 
 ```json
 {
+  "now": "Ni pratar om flytten till nya kontoret.",
   "topics": [
-    { "label": "Kontorsflytten", "weight": 0.9, "keywords": ["flytten", "nya kontoret", "lokal"] },
-    { "label": "Budget", "weight": 0.6, "keywords": ["budgeten", "kostnad", "offert"] }
+    { "label": "Kontorsflytten", "summary": "Flytten till nya kontoret blir i mars.", "weight": 0.9, "keywords": ["flytten", "nya kontoret"] },
+    { "label": "Budget", "summary": "Pengarna till kontoret räcker nästan inte.", "weight": 0.6, "keywords": ["budgeten", "tight"] }
   ]
 }
 ```
 
+Systemprompten (`docs/topics.js`) säger att texten är till för en person med nedsatt kognitiv förmåga och ber om lättläst svenska: högst 15 ord per mening, vanliga och konkreta ord, inga förkortningar, och vad som faktiskt sägs (vem, vad, när) i stället för abstrakta beskrivningar.
+
 **Molnet:**
-- Ämnesnamnen är de stora orden. Ämnenas ord visas runt omkring i samma färg, i 45 % av ämnets storlek. Ett ord som ligger under flera ämnen visas en gång, hos det starkaste.
+- Ämnesnamnen är de stora orden. Med *Visa nyckelord i molnet* påslaget visas ämnenas ord runt omkring i samma färg, i 45 % av ämnets storlek.
 - Vikterna avklingar mellan anropen: `vikt(t) = vikt(t0) · exp(-ln2 · (t - t0) / halveringstid)`, standard 120 s. Ett nytt svar blandas 50/50 med den avklingade gamla vikten, så molnet ändras mjukt.
 - **Ämnesstabilitet:** om Claude döper om ett ämne men orden i stort sett är desamma (Jaccard ≥ 0,5) behålls det gamla namnet.
 
 **Felhantering:** timeout på 15 s. Vid fel behålls senaste ämnen och de avklingar, och ett nytt försök görs vid nästa intervall. Indikatorn i sidhuvudet visar `offline` (inget nät, timeout) eller `fel` (HTTP-fel, avböjd förfrågan, svar utan verktygsanrop).
 
-**Kostnad:** som mest ett anrop per ~20 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Inställningarna visar tokens för sessionen.
+**Kostnad:** som mest ett anrop per ~10 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Inställningarna visar tokens för sessionen.
 
 **Integritet:** i inställningarna slås Claude av och på. När det slås av försvinner Claudes ämnen ur molnet direkt, och ett svar som kommer under tiden slängs.
 

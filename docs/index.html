@@ -26,9 +26,15 @@
   </div>
 
   <main>
+    <section id="now-card" class="now-card" aria-live="polite" hidden>
+      <div class="now-label">Just nu</div>
+      <p id="now-text" class="now-text"></p>
+      <div id="now-age" class="now-age"></div>
+    </section>
     <div id="cloud" class="cloud">
       <p id="empty" class="empty">Tryck på 🎙️ och börja prata.<br>Efter några meningar växer ämnena fram här.</p>
     </div>
+    <ul id="topic-list" class="topic-list" aria-label="Ämnen i samtalet"></ul>
     <section class="transcript-wrap">
       <div id="transcript" class="transcript" aria-live="polite"></div>
     </section>
@@ -69,8 +75,8 @@
         </label>
         <small class="note">Skickar transkriberad text (aldrig ljud) till Anthropic.</small>
         <label>
-          Intervall: <output id="llm-interval-out">20 s</output>
-          <input id="llm-interval" type="range" min="10" max="120" step="5" value="20">
+          Intervall: <output id="llm-interval-out">10 s</output>
+          <input id="llm-interval" type="range" min="5" max="60" step="5" value="10">
         </label>
         <small class="note" id="llm-usage"></small>
       </fieldset>
@@ -97,6 +103,12 @@
       <label>
         Antal ord: <output id="top-n-out">40</output>
         <input id="top-n" type="range" min="5" max="80" step="5" value="40">
+      </label>
+      <label class="check">
+        <input id="show-summaries" type="checkbox" checked> Visa förklaringar till ämnena
+      </label>
+      <label class="check">
+        <input id="show-keywords" type="checkbox"> Visa nyckelord i molnet
       </label>
       <label class="check">
         <input id="show-transcript" type="checkbox" checked> Visa transkript

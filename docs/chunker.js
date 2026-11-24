@@ -10,9 +10,9 @@ const FRAME_MS = 20;
 const MIN_VOICED_MS = 300;
 
 export const DEFAULT_AUDIO = {
-  chunkSeconds: 6,
-  maxChunkSeconds: 9,
-  cutSearchSeconds: 2,
+  chunkSeconds: 4,
+  maxChunkSeconds: 7,
+  cutSearchSeconds: 1.5,
   // RMS i float-skala (0–1). Motsvarar 250 i int16-skala.
   vadThreshold: 250 / 32768,
 };
@@ -33,10 +33,17 @@ export class Chunker {
   constructor(opts = {}) {
     this.cfg = { ...DEFAULT_AUDIO, ...opts };
     this.frameLen = (SAMPLE_RATE * FRAME_MS) / 1000;
-    this.chunkLen = Math.round(this.cfg.chunkSeconds * SAMPLE_RATE);
-    this.maxLen = Math.max(Math.round(this.cfg.maxChunkSeconds * SAMPLE_RATE), this.chunkLen);
-    this.searchLen = Math.round(this.cfg.cutSearchSeconds * SAMPLE_RATE);
+    this.setChunkSeconds(this.cfg.chunkSeconds, this.cfg.maxChunkSeconds);
     this.reset();
+  }
+
+  /** Ändra bitarnas längd medan ljudet strömmar (används för att anpassa sig efter telefonens fart). */
+  setChunkSeconds(seconds, maxSeconds = seconds + 3) {
+    this.cfg.chunkSeconds = seconds;
+    this.cfg.maxChunkSeconds = maxSeconds;
+    this.chunkLen = Math.round(seconds * SAMPLE_RATE);
+    this.maxLen = Math.max(Math.round(maxSeconds * SAMPLE_RATE), this.chunkLen);
+    this.searchLen = Math.round(this.cfg.cutSearchSeconds * SAMPLE_RATE);
   }
 
   reset() {

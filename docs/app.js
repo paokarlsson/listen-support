@@ -1,6 +1,6 @@
 // Talmoln i webbläsaren: mikrofon → AudioWorklet → chunkning → Whisper (Web Worker)
 // → transkript → Claude (ämnen) → ordmoln. Ingen server behövs.
-import { WordCloud } from './cloud.js';
+import { WordCloud, topicColor } from './cloud.js';
 import { Chunker, cleanText, countWords } from './chunker.js';
 import { TopicLayer } from './topics.js';
 
@@ -24,12 +24,17 @@ const store = {
   del(area, key) { try { window[area].removeItem(key); } catch { /* ignoreras */ } },
 };
 
+const SETTINGS_VERSION = 2;
 const DEFAULT_SETTINGS = {
-  halfLife: 120, maxWords: 40, interval: 20, llmEnabled: true,
-  model: 'KBLab/kb-whisper-base', showTranscript: true,
+  v: SETTINGS_VERSION, halfLife: 120, maxWords: 40, interval: 10, llmEnabled: true,
+  model: 'KBLab/kb-whisper-base', showTranscript: true, showSummaries: true, showKeywords: false,
 };
 let settings = { ...DEFAULT_SETTINGS };
 try { settings = { ...settings, ...JSON.parse(store.get('localStorage', SETTINGS_STORAGE) || '{}') }; } catch { /* ignoreras */ }
+if (settings.v !== SETTINGS_VERSION) {
+  // Version 2: snabbare standardintervall för Claude.
+  settings = { ...settings, v: SETTINGS_VERSION, interval: DEFAULT_SETTINGS.interval };
+}
 const saveSettings = () => store.set('localStorage', SETTINGS_STORAGE, JSON.stringify(settings));
 
 function loadKey() {
@@ -41,6 +46,7 @@ function loadKey() {
 const cloud = new WordCloud($('cloud'));
 const topics = new TopicLayer({
   halfLifeSeconds: settings.halfLife, maxWords: settings.maxWords, intervalSeconds: settings.interval,
+  showKeywords: settings.showKeywords,
 });
 topics.setApiKey(loadKey());
 topics.setEnabled(settings.llmEnabled);
@@ -186,6 +192,7 @@ function onTranscript({ id, text, ms }) {
   if (chunk) {
     // Hinner telefonen med? Tar en bit längre tid än den är lång växer kön.
     state.slowChunks = ms > chunk.durationS * 1000 ? state.slowChunks + 1 : 0;
+    adaptChunkLength(ms / 1000, chunk.durationS);
     if (state.slowChunks === 3) {
       log(`Whisper är för långsam: ${(ms / 1000).toFixed(1)} s för ${chunk.durationS.toFixed(1)} s ljud`);
     }
@@ -200,6 +207,21 @@ function onTranscript({ id, text, ms }) {
   updateInfo();
   pump();
   maybeRefreshTopics();
+}
+
+/** Korta bitar ger snabbare svar, men Whisper kostar ungefär lika mycket per bit oavsett
+ *  längd. Hinner telefonen inte med görs bitarna längre, och kortare igen när den hinner. */
+const MIN_CHUNK_S = 3;
+const MAX_CHUNK_S = 8;
+function adaptChunkLength(tookS, durationS) {
+  const cur = state.chunker.cfg.chunkSeconds;
+  let next = cur;
+  if (tookS > durationS * 0.8) next = Math.min(MAX_CHUNK_S, cur + 1);
+  else if (tookS < durationS * 0.35) next = Math.max(MIN_CHUNK_S, cur - 0.5);
+  if (next !== cur) {
+    state.chunker.setChunkSeconds(next, next + 3);
+    log(`Ljudbitar: ${next} s (Whisper tog ${tookS.toFixed(1)} s för ${durationS.toFixed(1)} s ljud)`);
+  }
 }
 
 // ---------------------------------------------------------------- Claude
@@ -376,6 +398,46 @@ function renderCloud() {
   const terms = topics.cloudTerms();
   if (terms.length) $('empty')?.remove();
   cloud.update(terms);
+  renderSummaries();
+}
+
+function ago(seconds) {
+  if (seconds < 15) return 'nyss';
+  if (seconds < 90) return `för ${Math.round(seconds / 5) * 5} sekunder sedan`;
+  return `för ${Math.round(seconds / 60)} minuter sedan`;
+}
+
+let shownNow = '';
+function renderSummaries() {
+  const nowS = Date.now() / 1000;
+  const card = $('now-card');
+  const now = topics.now;
+  card.hidden = !now;
+  if (now) {
+    if (now.text !== shownNow) {
+      shownNow = now.text;
+      $('now-text').textContent = now.text;
+      card.classList.remove('fresh');
+      void card.offsetWidth; // starta om animationen
+      card.classList.add('fresh');
+    }
+    const age = nowS - now.at;
+    $('now-age').textContent = `Uppdaterat ${ago(age)}`;
+    card.classList.toggle('stale', age > 90);
+  }
+  const list = $('topic-list');
+  const items = topics.current().filter((t) => t.summary).slice(0, 4);
+  const key = items.map((t) => `${t.label}|${t.summary}`).join('\n');
+  if (list.dataset.key === key) return;
+  list.dataset.key = key;
+  list.replaceChildren(...items.map((t) => {
+    const li = document.createElement('li');
+    li.style.color = topicColor(t.label);
+    const label = Object.assign(document.createElement('div'), { className: 't-label', textContent: t.label });
+    const summary = Object.assign(document.createElement('div'), { className: 't-summary', textContent: t.summary });
+    li.append(label, summary);
+    return li;
+  }));
 }
 
 function addSegment(text) {
@@ -483,6 +545,9 @@ function applySettingsToUi() {
   $('asr-model').value = settings.model;
   $('show-transcript').checked = settings.showTranscript;
   document.body.classList.toggle('no-transcript', !settings.showTranscript);
+  $('show-summaries').checked = settings.showSummaries;
+  document.body.classList.toggle('no-summaries', !settings.showSummaries);
+  $('show-keywords').checked = settings.showKeywords;
   $('api-key').value = topics.apiKey;
   $('remember-key').checked = !!store.get('localStorage', KEY_STORAGE) || !topics.apiKey;
   $('key-status').textContent = topics.apiKey ? 'En nyckel är sparad.' : '';
@@ -519,6 +584,18 @@ $('asr-model').addEventListener('change', (e) => {
     restartWorker('Bytt modell');
     state.workerRestarts = 0;
   }
+});
+
+$('show-summaries').addEventListener('change', (e) => {
+  settings.showSummaries = e.target.checked;
+  saveSettings();
+  document.body.classList.toggle('no-summaries', !e.target.checked);
+});
+$('show-keywords').addEventListener('change', (e) => {
+  settings.showKeywords = e.target.checked;
+  saveSettings();
+  topics.cfg.showKeywords = e.target.checked;
+  renderCloud();
 });
 
 $('show-transcript').addEventListener('change', (e) => {
@@ -579,6 +656,7 @@ $('reset').addEventListener('click', () => {
   topics.reset();
   $('transcript').replaceChildren();
   cloud.clear();
+  renderSummaries();
   renderLlm();
   $('settings').close();
 });
@@ -597,7 +675,10 @@ $('export').addEventListener('click', () => {
     })),
     transcript: state.segments.map((s) => s.text).join(' '),
     top: topics.cloudTerms(now),
-    topics: topics.current(now).map((t) => ({ label: t.label, score: Math.round(t.score * 1e4) / 1e4, keywords: t.keywords })),
+    now: topics.now?.text || null,
+    topics: topics.current(now).map((t) => ({
+      label: t.label, summary: t.summary, score: Math.round(t.score * 1e4) / 1e4, keywords: t.keywords,
+    })),
     llm: topics.info(now),
   };
   const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').replace(/^(\d{8})/, '$1-');
@@ -618,4 +699,4 @@ setStatus();
 renderLlm();
 setInterval(maybeRefreshTopics, 1000);
 setInterval(watchdog, WATCHDOG_MS);
-setInterval(() => { if (topics.topics.size) renderCloud(); renderLlm(); }, 2000);
+setInterval(() => { if (topics.topics.size || topics.now) renderCloud(); renderLlm(); }, 2000);

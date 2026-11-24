@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TopicLayer, TOOL_NAME, API_URL } from '../docs/topics.js';
 
-const toolResponse = (topics, usage = [1200, 80]) => ({
-  content: [{ type: 'tool_use', id: 't', name: TOOL_NAME, input: { topics } }],
+const toolResponse = (topics, usage = [1200, 80], now = '') => ({
+  content: [{ type: 'tool_use', id: 't', name: TOOL_NAME, input: { now, topics } }],
   stop_reason: 'tool_use', usage: { input_tokens: usage[0], output_tokens: usage[1] },
 });
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -101,7 +101,7 @@ test('vikter blandas och omdöpta ämnen känns igen', () => {
 });
 
 test('molnet: ämnen störst, ord grupperade under starkaste ämnet', () => {
-  const { layer } = layerWith(null, { keywordFactor: 0.5 });
+  const { layer } = layerWith(null, { keywordFactor: 0.5, showKeywords: true });
   layer.apply([
     { label: 'Kontorsflytten', weight: 1, keywords: ['flytten', 'nya kontoret'] },
     { label: 'Budget', weight: 0.6, keywords: ['budgeten', 'flytten'] },
@@ -125,4 +125,37 @@ test('byte av halveringstid behåller nuvarande vikter', () => {
   assert.ok(Math.abs(layer.current()[0].score - 0.5) < 1e-9);
   clock.t = 1110;
   assert.ok(Math.abs(layer.current()[0].score - 0.25) < 1e-9);
+});
+
+test('svaret ger en mening om just nu och en mening per ämne', async () => {
+  let body;
+  const { layer, clock } = layerWith(async (_u, init) => {
+    body = JSON.parse(init.body);
+    return json(200, toolResponse(
+      [{ label: 'Kontorsflytten', summary: 'Flytten till nya kontoret blir i mars.', weight: 0.9, keywords: ['flytten'] }],
+      [900, 60], 'Ni pratar om flytten till nya kontoret.',
+    ));
+  });
+  await layer.refresh('flytten till nya kontoret blir i mars');
+  const schema = body.tools[0].input_schema;
+  assert.deepEqual(schema.required, ['now', 'topics']);
+  assert.ok(schema.properties.topics.items.required.includes('summary'));
+  assert.match(body.system, /lättläst svenska/);
+  assert.deepEqual(layer.now, { text: 'Ni pratar om flytten till nya kontoret.', at: clock.t });
+  assert.equal(layer.current()[0].summary, 'Flytten till nya kontoret blir i mars.');
+});
+
+test('tom just-nu-mening behåller den förra, och av/på tömmer den', () => {
+  const { layer } = layerWith(null);
+  layer.apply({ now: 'Budgeten är tight.', topics: [] }, 1000);
+  layer.apply({ now: '', topics: [] }, 1010);
+  assert.equal(layer.now.text, 'Budgeten är tight.');
+  layer.setEnabled(false);
+  assert.equal(layer.now, null);
+});
+
+test('nyckelord visas inte i molnet som standard', () => {
+  const { layer } = layerWith(null);
+  layer.apply({ now: 'x', topics: [{ label: 'Budget', summary: 's', weight: 1, keywords: ['budgeten'] }] }, 1000);
+  assert.deepEqual(layer.cloudTerms().map((r) => r.text), ['Budget']);
 });

@@ -11,28 +11,44 @@ export const TOOL_NAME = 'report_topics';
 
 export const DEFAULT_TOPICS = {
   model: 'claude-haiku-5-5',
-  intervalSeconds: 20,
-  minNewWords: 20,
-  windowSeconds: 180,
+  intervalSeconds: 10,
+  minNewWords: 8,
+  windowSeconds: 120,
   maxWindowChars: 8000,
   maxTopics: 8,
   timeoutSeconds: 15,
   maxTokens: 1024,
   halfLifeSeconds: 120,
   forgetBelow: 0.05,
-  showKeywords: true,
+  showKeywords: false,
   keywordFactor: 0.45,
   maxWords: 40,
 };
 
 const SYSTEM_PROMPT = (maxTopics) => `\
-Du får ett löpande transkript av ett samtal på svenska, transkriberat automatiskt \
-och därför med fel. Identifiera de 3–${maxTopics} ämnen som samtalet handlar om just nu. \
-Ge varje ämne ett kort namn (1–3 ord, svenska), en vikt 0–1 efter hur mycket det \
-pratas om det i det senaste avsnittet, och de ord ur transkriptet som hör till ämnet. \
-Återanvänd namn från föregående ämneslista när ämnet är detsamma. \
-Hitta inte på ämnen som inte nämns. Om transkriptet är för kort eller osammanhängande \
-för att säga något om, returnera färre ämnen eller en tom lista.
+Du hjälper en person med nedsatt kognitiv förmåga att hänga med i ett samtal. Du får \
+ett löpande transkript av samtalet på svenska. Det är automatiskt transkriberat och \
+innehåller därför fel.
+
+Svara med:
+- now: en mening som säger vad samtalet handlar om just nu, alltså i det senaste avsnittet.
+- topics: de 1–${maxTopics} ämnen som samtalet handlar om, viktigast först. För varje ämne:
+  - label: ett kort namn, 1–3 ord.
+  - summary: en mening om vad som sägs om ämnet.
+  - weight: 0–1, hur mycket det pratas om ämnet i det senaste avsnittet.
+  - keywords: ord ur transkriptet som hör till ämnet.
+
+Skriv på lättläst svenska:
+- Högst 15 ord per mening.
+- Vanliga, konkreta ord. Inga förkortningar, inga facktermer.
+- Säg vad som faktiskt sägs: vem, vad, när. Skriv till exempel \
+"Flytten till nya kontoret blir i mars." och inte "Samtalet berör en flytt."
+- Tilltala inte läsaren och skriv inte "transkriptet".
+
+Återanvänd namnen från föregående ämneslista när ämnet är detsamma, så att det är lätt \
+att känna igen. Hitta inte på något som inte sägs. Gissa inte när transkriptet är \
+otydligt: hoppa över det. Om det inte går att säga vad samtalet handlar om, låt now \
+vara tom och returnera en tom lista.
 
 Svara genom att anropa verktyget report_topics.`;
 
@@ -43,17 +59,19 @@ export const TOOL = {
   input_schema: {
     type: 'object',
     additionalProperties: false,
-    required: ['topics'],
+    required: ['now', 'topics'],
     properties: {
+      now: { type: 'string', description: 'En mening på lättläst svenska: vad samtalet handlar om just nu.' },
       topics: {
         type: 'array',
         description: 'Ämnen, viktigast först.',
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['label', 'weight', 'keywords'],
+          required: ['label', 'summary', 'weight', 'keywords'],
           properties: {
             label: { type: 'string', description: 'Kort ämnesnamn, 1–3 ord, svenska.' },
+            summary: { type: 'string', description: 'En mening på lättläst svenska om vad som sägs om ämnet.' },
             weight: { type: 'number', description: '0–1: hur mycket det pratas om ämnet just nu.' },
             keywords: {
               type: 'array',
@@ -83,7 +101,8 @@ export class TopicLayer {
     this.enabled = true;
     this.fetch = fetchFn || ((...a) => fetch(...a));
     this.clock = clock || (() => Date.now() / 1000);
-    this.topics = new Map(); // norm(label) → { label, score, updated, keywords }
+    this.topics = new Map(); // norm(label) → { label, score, updated, keywords, summary }
+    this.now = null;         // { text, at }: vad samtalet handlar om just nu
     this.status = 'pending';
     this.lastError = null;
     this.lastSuccess = null;
@@ -104,7 +123,7 @@ export class TopicLayer {
 
   setEnabled(on) {
     this.enabled = !!on;
-    if (!this.enabled) this.topics.clear(); // integritet: ämnena försvinner direkt
+    if (!this.enabled) { this.topics.clear(); this.now = null; } // integritet: allt från Claude försvinner direkt
   }
 
   resetUsage() {
@@ -113,6 +132,7 @@ export class TopicLayer {
 
   reset() {
     this.topics.clear();
+    this.now = null;
     this.lastSuccess = null;
     this.lastAttempt = 0;
     this.resetUsage();
@@ -161,7 +181,7 @@ export class TopicLayer {
     for (const [key, t] of this.topics) {
       const s = this.scoreAt(t, now);
       if (s < this.cfg.forgetBelow) { this.topics.delete(key); continue; }
-      out.push({ label: t.label, score: s, keywords: t.keywords });
+      out.push({ label: t.label, score: s, keywords: t.keywords, summary: t.summary || '' });
     }
     return out.sort((a, b) => b.score - a.score);
   }
@@ -280,7 +300,7 @@ export class TopicLayer {
     if (data.stop_reason === 'refusal') throw new TopicError('error', 'Claude avböjde förfrågan');
     for (const block of data.content || []) {
       if (block.type === 'tool_use' && block.name === TOOL_NAME && Array.isArray(block.input?.topics)) {
-        return block.input.topics;
+        return block.input;
       }
     }
     throw new TopicError('error', `Inget ${TOOL_NAME}-anrop i svaret (stop_reason=${data.stop_reason})`);
@@ -299,8 +319,14 @@ export class TopicLayer {
 
   // -- sammanvägning över tid --------------------------------------------------
 
-  /** Väv in ett nytt svar: blanda med de avklingade gamla vikterna och fånga namnbyten. */
-  apply(rawTopics, now) {
+  /** Väv in ett nytt svar: blanda med de avklingade gamla vikterna och fånga namnbyten.
+   *  Tar emot verktygets indata ({ now, topics }) eller bara listan med ämnen. */
+  apply(result, now) {
+    const rawTopics = Array.isArray(result) ? result : result?.topics;
+    if (!Array.isArray(result) && typeof result?.now === 'string') {
+      const text = result.now.trim();
+      if (text) this.now = { text, at: now };
+    }
     const cleaned = [];
     for (const item of (rawTopics || []).slice(0, this.cfg.maxTopics)) {
       if (!item || typeof item !== 'object') continue;
@@ -310,10 +336,11 @@ export class TopicLayer {
       if (!Number.isFinite(weight)) weight = 0;
       weight = Math.min(1, Math.max(0, weight));
       const kws = (Array.isArray(item.keywords) ? item.keywords : []).map((k) => String(k).trim()).filter(Boolean);
-      cleaned.push({ label, weight, kws });
+      const summary = String(item.summary || '').trim();
+      cleaned.push({ label, weight, kws, summary });
     }
     const used = new Set();
-    for (const { label, weight, kws } of cleaned) {
+    for (const { label, weight, kws, summary } of cleaned) {
       let key = norm(label);
       let existing = this.topics.get(key);
       if (!existing) {
@@ -326,11 +353,12 @@ export class TopicLayer {
       }
       used.add(key);
       if (!existing) {
-        this.topics.set(key, { label, score: weight, updated: now, keywords: kws });
+        this.topics.set(key, { label, score: weight, updated: now, keywords: kws, summary });
       } else {
         existing.score = 0.5 * this.scoreAt(existing, now) + 0.5 * weight;
         existing.updated = now;
         if (kws.length) existing.keywords = kws;
+        if (summary) existing.summary = summary;
       }
     }
   }

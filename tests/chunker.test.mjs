@@ -48,3 +48,12 @@ test('cleanText tar bort hallucinationer och ljudtaggar', () => {
   assert.equal(cleanText('  vi pratar om flytten '), 'vi pratar om flytten');
   assert.equal(countWords('Vi måste prata om budgeten, 2024!'), 5);
 });
+
+test('bitarnas längd kan ändras medan ljudet strömmar', () => {
+  const ch = new Chunker();
+  assert.equal(ch.cfg.chunkSeconds, 4);
+  ch.setChunkSeconds(6, 9);
+  const chunks = feedAll(ch, concat(tone(7), silence(0.5), tone(1)));
+  assert.equal(chunks.length, 1);
+  assert.ok(chunks[0].durationS >= 7 && chunks[0].durationS <= 7.1, chunks[0].durationS);
+});

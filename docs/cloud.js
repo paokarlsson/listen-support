@@ -9,6 +9,11 @@
 const PALETTE = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'];
 const PAD = 4; // px luft runt varje ord
 
+/** Färgen för ett ämne (samma i molnet och i listan). */
+export function topicColor(name) {
+  return `var(${PALETTE[hash(String(name).toLowerCase()) % PALETTE.length]})`;
+}
+
 function hash(str) {
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) {
@@ -77,7 +82,7 @@ export class WordCloud {
       // Ett ämne och dess ord får samma färg, så att de syns som en grupp.
       const isTopic = term.kind === 'topic';
       w.el.classList.toggle('topic', isTopic);
-      w.el.style.color = `var(${PALETTE[hash((term.topic || text).toLowerCase()) % PALETTE.length]})`;
+      w.el.style.color = topicColor(term.topic || text);
 
       // Försök några gånger med mindre storlek om ordet inte får plats.
       let spot = null;
