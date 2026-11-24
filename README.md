@@ -8,7 +8,7 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 
 ## Kom igång
 
-1. **Slå på GitHub Pages:** på GitHub, gå till repot → **Settings** → **Pages**. Under *Build and deployment*, välj *Source* **Deploy from a branch**, grenen **`main`** och mappen **`/docs`**, och tryck **Save**. Efter någon minut ligger sidan på **https://paokarlsson.github.io/listen-support/**.
+1. **Slå på GitHub Pages (en gång):** på GitHub, gå till repot → **Settings** → **Pages**. Under *Build and deployment*, välj *Source* **GitHub Actions**. Sedan publicerar workflowen `.github/workflows/pages.yml` mappen `docs/` vid varje push till `main`, efter att testerna gått igenom. Sidan ligger på **https://paokarlsson.github.io/listen-support/**. Har en publicering misslyckats innan Pages slogs på: kör om den under **Actions** → *Publicera till GitHub Pages* → **Run workflow**.
 2. **Öppna sidan i Chrome på telefonen**, tryck på ⚙️ och klistra in din Anthropic API-nyckel. Tryck **Testa** för att kontrollera den. Nyckeln skapar du på console.anthropic.com under *API Keys*.
 3. **Tryck på 🎙️** och tillåt mikrofonen. Första gången laddas Whisper-modellen ner, med en förloppsindikator. Sedan finns den kvar i webbläsaren.
 
@@ -119,6 +119,9 @@ Biblioteket är [transformers.js](https://github.com/huggingface/transformers.js
 .
 ├── README.md
 ├── package.json              # npm test
+├── .github/workflows/
+│   ├── pages.yml             # push till main: tester → publicera docs/ till GitHub Pages
+│   └── test.yml              # tester på andra grenar och pull requests
 ├── docs/                     # webbappen (GitHub Pages)
 │   ├── index.html, style.css
 │   ├── app.js                # mic → worklet → chunkning → Whisper-worker → Claude → moln
