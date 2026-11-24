@@ -1,128 +1,187 @@
 <!doctype html>
-<html lang="sv">
+<html lang="sv" data-theme="auto" data-size="normal" data-motion="auto">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#101418">
-  <title>Talmoln</title>
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e1217" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Talmoln visar med korta, lättlästa meningar vad ett samtal handlar om just nu.">
+  <title>Talmoln – vad pratar vi om?</title>
+  <link rel="preload" href="fonts/atkinson-hyperlegible-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Talmoln</h1>
-    <div class="header-right">
-      <button id="llm" class="llm" data-status="off" title="Ämnen (Claude)">
-        <span class="dot"></span><span id="llm-text">Ämnen</span>
+  <!-- Ikoner (ritade för Talmoln). Används med <svg><use href="#i-…"/></svg>. -->
+  <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#now-card">Hoppa till Just nu</a>
+
+  <header class="topbar">
+    <h1 class="brand"><span class="brand-mark" aria-hidden="true"></span>Talmoln</h1>
+    <div class="chips">
+      <button id="llm" class="chip" data-status="off" type="button" aria-describedby="llm-help">
+        <span class="dot" aria-hidden="true"></span><span id="llm-text">Ämnen</span>
       </button>
-      <div id="status" class="status"><span class="dot"></span><span id="status-text">Redo</span></div>
+      <span id="llm-help" class="visually-hidden">Öppnar inställningarna för Claude.</span>
+      <div id="status" class="chip chip-static" role="status">
+        <span class="dot" aria-hidden="true"></span><span id="status-text">Redo</span>
+      </div>
     </div>
   </header>
 
-  <div id="warning" class="warning" hidden></div>
-  <div id="notice" class="warning" hidden></div>
-  <div id="model-progress" class="model-progress" hidden>
-    <div class="bar"><div id="model-bar"></div></div>
-    <span id="model-text"></span>
+  <div class="alerts">
+    <div id="warning" class="alert alert-warn" role="alert" hidden></div>
+    <div id="notice" class="alert alert-info" role="status" hidden></div>
+    <div id="model-progress" class="alert alert-info progress" hidden>
+      <span id="model-text"></span>
+      <div class="bar" role="progressbar" aria-labelledby="model-text" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="model-bar"></div>
+      </div>
+    </div>
   </div>
 
-  <main>
-    <section id="now-card" class="now-card" aria-live="polite" hidden>
-      <div class="now-label">Just nu</div>
-      <p id="now-text" class="now-text"></p>
-      <div id="now-age" class="now-age"></div>
+  <main class="layout">
+    <section id="now-card" class="card now-card" aria-labelledby="now-heading" tabindex="-1">
+      <h2 id="now-heading" class="eyebrow"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg>Just nu</h2>
+      <p id="now-text" class="now-text" aria-live="polite">Tryck på <strong>Starta</strong> och börja prata. Efter några meningar står det här vad samtalet handlar om.</p>
+      <p id="now-age" class="now-age"></p>
     </section>
-    <div id="cloud" class="cloud">
-      <p id="empty" class="empty">Tryck på 🎙️ och börja prata.<br>Efter några meningar växer ämnena fram här.</p>
-    </div>
-    <ul id="topic-list" class="topic-list" aria-label="Ämnen i samtalet"></ul>
-    <section class="transcript-wrap">
-      <div id="transcript" class="transcript" aria-live="polite"></div>
+
+    <section class="card cloud-card" aria-labelledby="cloud-heading">
+      <h2 id="cloud-heading" class="visually-hidden">Ordmoln</h2>
+      <div id="cloud" class="cloud" role="img" aria-label="Ordmoln, inga ämnen ännu">
+        <p id="empty" class="empty" aria-hidden="true">Här växer ämnena fram.</p>
+      </div>
+    </section>
+
+    <section id="topics-section" class="topics-section" aria-labelledby="topics-heading">
+      <h2 id="topics-heading" class="eyebrow">Ämnen</h2>
+      <ul id="topic-list" class="topic-list"></ul>
+    </section>
+
+    <section class="transcript-section" aria-labelledby="transcript-heading">
+      <h2 id="transcript-heading" class="eyebrow">Det som sagts</h2>
+      <div id="transcript" class="transcript" role="log" aria-live="off" tabindex="0" aria-labelledby="transcript-heading"></div>
     </section>
   </main>
 
-  <footer>
+  <footer class="bottombar">
     <div class="meter" aria-hidden="true"><div id="level" class="level"></div></div>
     <div class="controls">
-      <button id="settings-btn" class="icon" title="Inställningar" aria-label="Inställningar">⚙️</button>
-      <button id="mic" class="mic" aria-pressed="false" aria-label="Starta mikrofonen">🎙️</button>
-      <span id="info" class="info"></span>
+      <button id="settings-btn" class="btn btn-ghost btn-icon-label" type="button">
+        <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Inställningar</span>
+      </button>
+      <button id="mic" class="mic" type="button" aria-pressed="false">
+        <svg class="icon icon-lg" aria-hidden="true"><use id="mic-icon" href="#i-mic"/></svg>
+        <span id="mic-label">Starta</span>
+      </button>
+      <p id="info" class="info"></p>
     </div>
   </footer>
 
-  <dialog id="settings">
-    <form method="dialog">
-      <h2>Inställningar</h2>
+  <dialog id="settings" aria-labelledby="settings-title">
+    <form method="dialog" class="sheet">
+      <div class="sheet-head">
+        <h2 id="settings-title">Inställningar</h2>
+        <button class="btn btn-ghost btn-square" value="close" aria-label="Stäng inställningarna">
+          <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
+      </div>
 
-      <fieldset>
-        <legend>Claude (ämnen)</legend>
-        <label>
-          Anthropic API-nyckel
-          <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
-        </label>
-        <label class="check">
-          <input id="remember-key" type="checkbox" checked> Kom ihåg nyckeln på den här enheten
-        </label>
-        <div class="row">
-          <button type="button" id="save-key">Spara</button>
-          <button type="button" id="test-key">Testa</button>
-          <button type="button" id="forget-key" class="danger">Glöm</button>
-        </div>
-        <small class="note" id="key-status"></small>
-        <small class="note">Nyckeln sparas bara i den här webbläsaren och skickas bara till api.anthropic.com.
-          Använd en egen nyckel med låg utgiftsgräns.</small>
-        <label class="check">
-          <input id="llm-enabled" type="checkbox" checked> Använd Claude för ämnen
-        </label>
-        <small class="note">Skickar transkriberad text (aldrig ljud) till Anthropic.</small>
-        <label>
-          Intervall: <output id="llm-interval-out">10 s</output>
-          <input id="llm-interval" type="range" min="5" max="60" step="5" value="10">
-        </label>
-        <small class="note" id="llm-usage"></small>
-      </fieldset>
-
-      <fieldset>
-        <legend>Taligenkänning (i webbläsaren)</legend>
-        <label>
-          Modell
-          <select id="asr-model">
-            <option value="KBLab/kb-whisper-base">KB-Whisper base – bra svenska (standard)</option>
-            <option value="KBLab/kb-whisper-tiny">KB-Whisper tiny – snabbare, sämre</option>
-            <option value="onnx-community/whisper-base">Whisper base (OpenAI, flerspråkig)</option>
-            <option value="onnx-community/whisper-tiny">Whisper tiny (OpenAI, flerspråkig)</option>
+      <section class="group" aria-labelledby="g-look">
+        <h3 id="g-look">Utseende</h3>
+        <label class="field">
+          <span class="field-label">Tema</span>
+          <select id="theme">
+            <option value="auto">Som telefonen</option>
+            <option value="light">Ljust</option>
+            <option value="dark">Mörkt</option>
           </select>
         </label>
-        <small class="note" id="asr-status">Modellen laddas ner första gången du trycker på 🎙️ och sparas sedan i webbläsaren.</small>
-      </fieldset>
+        <label class="field">
+          <span class="field-label">Textstorlek</span>
+          <select id="text-size">
+            <option value="normal">Normal</option>
+            <option value="large">Stor</option>
+            <option value="xlarge">Extra stor</option>
+          </select>
+        </label>
+        <label class="switch"><input id="reduce-motion" type="checkbox"><span>Minska rörelser</span></label>
+        <label class="switch"><input id="show-summaries" type="checkbox" checked><span>Visa förklaringar till ämnena</span></label>
+        <label class="switch"><input id="show-keywords" type="checkbox"><span>Visa nyckelord i molnet</span></label>
+        <label class="switch"><input id="show-transcript" type="checkbox" checked><span>Visa det som sagts</span></label>
+      </section>
 
-      <label>
-        Halveringstid: <output id="half-life-out">120 s</output>
-        <input id="half-life" type="range" min="15" max="900" step="15" value="120">
-        <small>Hur snabbt gamla ämnen tonar ut.</small>
-      </label>
-      <label>
-        Antal ord: <output id="top-n-out">40</output>
-        <input id="top-n" type="range" min="5" max="80" step="5" value="40">
-      </label>
-      <label class="check">
-        <input id="show-summaries" type="checkbox" checked> Visa förklaringar till ämnena
-      </label>
-      <label class="check">
-        <input id="show-keywords" type="checkbox"> Visa nyckelord i molnet
-      </label>
-      <label class="check">
-        <input id="show-transcript" type="checkbox" checked> Visa transkript
-      </label>
-      <details class="diag">
-        <summary>Diagnostik</summary>
-        <pre id="diag-log"></pre>
-        <button type="button" id="copy-log">Kopiera loggen</button>
-      </details>
-      <div class="row">
-        <button type="button" id="export">Exportera JSON</button>
-        <button type="button" id="reset" class="danger">Nollställ</button>
-      </div>
-      <div class="row end"><button value="close">Stäng</button></div>
+      <section class="group" aria-labelledby="g-claude">
+        <h3 id="g-claude">Claude</h3>
+        <label class="field">
+          <span class="field-label">Anthropic API-nyckel</span>
+          <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…" aria-describedby="key-help key-status">
+        </label>
+        <label class="switch"><input id="remember-key" type="checkbox" checked><span>Kom ihåg nyckeln på den här enheten</span></label>
+        <div class="row">
+          <button type="button" id="save-key" class="btn">Spara</button>
+          <button type="button" id="test-key" class="btn">Testa</button>
+          <button type="button" id="forget-key" class="btn btn-danger">Glöm</button>
+        </div>
+        <p id="key-status" class="help" role="status"></p>
+        <p id="key-help" class="help">Nyckeln sparas bara i den här webbläsaren och skickas bara till api.anthropic.com. Använd en egen nyckel med låg utgiftsgräns.</p>
+        <label class="switch"><input id="llm-enabled" type="checkbox" checked aria-describedby="llm-enabled-help"><span>Använd Claude för ämnen</span></label>
+        <p id="llm-enabled-help" class="help">Skickar det som sagts som text, aldrig ljud, till Anthropic.</p>
+        <label class="field">
+          <span class="field-label">Uppdatera som oftast var <output id="llm-interval-out" for="llm-interval">10 s</output></span>
+          <input id="llm-interval" type="range" min="5" max="60" step="5" value="10">
+        </label>
+        <p id="llm-usage" class="help"></p>
+      </section>
+
+      <section class="group" aria-labelledby="g-asr">
+        <h3 id="g-asr">Taligenkänning</h3>
+        <label class="field">
+          <span class="field-label">Modell</span>
+          <select id="asr-model" aria-describedby="asr-status">
+            <option value="KBLab/kb-whisper-base">KB-Whisper base – bra svenska</option>
+            <option value="KBLab/kb-whisper-tiny">KB-Whisper tiny – snabbare</option>
+            <option value="onnx-community/whisper-base">Whisper base (OpenAI)</option>
+            <option value="onnx-community/whisper-tiny">Whisper tiny (OpenAI)</option>
+          </select>
+        </label>
+        <p id="asr-status" class="help">Modellen laddas ner första gången du trycker på Starta och sparas sedan i webbläsaren.</p>
+      </section>
+
+      <section class="group" aria-labelledby="g-cloud">
+        <h3 id="g-cloud">Ordmolnet</h3>
+        <label class="field">
+          <span class="field-label">Gamla ämnen tonar ut efter <output id="half-life-out" for="half-life">120 s</output></span>
+          <input id="half-life" type="range" min="15" max="900" step="15" value="120">
+        </label>
+        <label class="field">
+          <span class="field-label">Högst <output id="top-n-out" for="top-n">40</output> ord</span>
+          <input id="top-n" type="range" min="5" max="80" step="5" value="40">
+        </label>
+      </section>
+
+      <section class="group" aria-labelledby="g-data">
+        <h3 id="g-data">Data</h3>
+        <div class="row">
+          <button type="button" id="export" class="btn">Spara som fil</button>
+          <button type="button" id="reset" class="btn btn-danger">Börja om</button>
+        </div>
+        <details class="diag">
+          <summary>Diagnostik</summary>
+          <pre id="diag-log"></pre>
+          <button type="button" id="copy-log" class="btn">Kopiera loggen</button>
+        </details>
+      </section>
+
+      <div class="sheet-foot"><button value="close" class="btn btn-primary">Klar</button></div>
     </form>
   </dialog>
 

@@ -11,8 +11,8 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 ## Kom igång
 
 1. **Slå på GitHub Pages (en gång):** på GitHub, gå till repot → **Settings** → **Pages**. Under *Build and deployment*, välj *Source* **GitHub Actions**. Sedan publicerar workflowen `.github/workflows/pages.yml` mappen `docs/` vid varje push till `main`, efter att testerna gått igenom. Sidan ligger på **https://paokarlsson.github.io/listen-support/**. Har en publicering misslyckats innan Pages slogs på: kör om den under **Actions** → *Publicera till GitHub Pages* → **Run workflow**.
-2. **Öppna sidan i Chrome på telefonen**, tryck på ⚙️ och klistra in din Anthropic API-nyckel. Tryck **Testa** för att kontrollera den. Nyckeln skapar du på console.anthropic.com under *API Keys*.
-3. **Tryck på 🎙️** och tillåt mikrofonen. Första gången laddas Whisper-modellen ner, med en förloppsindikator. Sedan finns den kvar i webbläsaren.
+2. **Öppna sidan i Chrome på telefonen**, tryck på **Inställningar** och klistra in din Anthropic API-nyckel. Tryck **Testa** för att kontrollera den. Nyckeln skapar du på console.anthropic.com under *API Keys*.
+3. **Tryck på Starta** och tillåt mikrofonen. Första gången laddas Whisper-modellen ner, med en förloppsindikator. Sedan finns den kvar i webbläsaren.
 
 ---
 
@@ -25,6 +25,26 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 - **Tidsavklingning**: gamla ämnen tonar ut så att molnet visar det som pågår nu.
 
 Inte i scope: talaridentifiering, konton eller delning, analys av retorik.
+
+---
+
+## Tillgänglighet
+
+Gränssnittet följer **WCAG 2.2 nivå AA**, och nivå AAA där det går:
+
+- **Kontrast:** all text har minst 4,5:1 mot bakgrunden, och det mesta över 7:1. Kanter på knappar och fält har minst 3:1.
+- **Lättläst:** typsnittet Atkinson Hyperlegible, framtaget av Braille Institute för läsbarhet. Meningarna från Claude är på lättläst svenska. Knapparna har text, inte bara ikoner.
+- **Anpassningsbart** under Inställningar → Utseende: ljust eller mörkt tema (eller som telefonen), tre textstorlekar och *Minska rörelser*. Telefonens inställning för minskade rörelser följs också automatiskt.
+- **Stora pekytor:** minst 48 × 48 px.
+- **Tangentbord och skärmläsare:**
+  - En länk för att hoppa direkt till Just nu, och tydliga fokusmarkeringar.
+  - Rubriker och landmärken.
+  - "Just nu" läses upp när den ändras.
+  - Ordmolnet har en textbeskrivning, och samma innehåll finns som lista.
+  - Inställningarna öppnas i en dialog som stängs med Escape.
+- **Ombrytning:** fungerar på 320 px bred skärm med extra stor text, utan vågrät scroll.
+
+Kontrollerat automatiskt med axe-core (WCAG 2.0–2.2 A/AA) i ljust och mörkt tema, med normal och extra stor text: inga fel. Automatiska kontroller hittar bara en del av alla problem. Testa gärna med TalkBack och med personer i målgruppen.
 
 ---
 
@@ -135,6 +155,7 @@ Systemprompten (`docs/topics.js`) säger att texten är till för en person med 
 │   ├── chunker.js            # chunkning vid tystnad, VAD, hallucinationsfilter
 │   ├── topics.js             # ämneslagret: anropar Claude, tolkar svaret, bygger molnet
 │   ├── cloud.js              # ordmolnet (egen layout, mjuka animationer)
+│   ├── fonts/                # Atkinson Hyperlegible (SIL Open Font License)
 │   └── pcm-worklet.js        # AudioWorkletProcessor: mikrofon → float32 @16 kHz
 └── tests/                    # node --test
     ├── chunker.test.mjs

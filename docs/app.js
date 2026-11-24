@@ -28,6 +28,7 @@ const SETTINGS_VERSION = 2;
 const DEFAULT_SETTINGS = {
   v: SETTINGS_VERSION, halfLife: 120, maxWords: 40, interval: 10, llmEnabled: true,
   model: 'KBLab/kb-whisper-base', showTranscript: true, showSummaries: true, showKeywords: false,
+  theme: 'auto', textSize: 'normal', reduceMotion: false,
 };
 let settings = { ...DEFAULT_SETTINGS };
 try { settings = { ...settings, ...JSON.parse(store.get('localStorage', SETTINGS_STORAGE) || '{}') }; } catch { /* ignoreras */ }
@@ -36,6 +37,15 @@ if (settings.v !== SETTINGS_VERSION) {
   settings = { ...settings, v: SETTINGS_VERSION, interval: DEFAULT_SETTINGS.interval };
 }
 const saveSettings = () => store.set('localStorage', SETTINGS_STORAGE, JSON.stringify(settings));
+
+/** Tema, textstorlek och rörelser sätts på <html> så att CSS kan följa dem. */
+function applyAppearance() {
+  const root = document.documentElement;
+  root.dataset.theme = settings.theme;
+  root.dataset.size = settings.textSize;
+  root.dataset.motion = settings.reduceMotion ? 'reduced' : 'auto';
+}
+applyAppearance();
 
 function loadKey() {
   return store.get('localStorage', KEY_STORAGE) || store.get('sessionStorage', KEY_STORAGE) || '';
@@ -131,7 +141,7 @@ function restartWorker(reason) {
   state.pending.clear();
   if (state.workerRestarts > 3) {
     state.asr.status = 'error';
-    state.asr.error = 'Whisper har hängt sig flera gånger. Välj KB-Whisper tiny under ⚙️ och ladda om sidan.';
+    state.asr.error = 'Whisper har hängt sig flera gånger. Välj KB-Whisper tiny under Inställningar och ladda om sidan.';
     renderAsr();
     return;
   }
@@ -308,7 +318,7 @@ async function restartAudio(reason) {
     state.lastAudioAt = state.lastSoundAt = Date.now() / 1000;
   } catch (err) {
     log(`Kunde inte öppna mikrofonen igen: ${err.message}`);
-    showWarning(`Mikrofonen stannade och kunde inte startas igen (${err.message}). Tryck på 🎙️.`);
+    showWarning(`Mikrofonen stannade och kunde inte startas igen (${err.message}). Tryck på Starta.`);
     await stopMic();
   } finally {
     state.restarting = false;
@@ -330,9 +340,8 @@ async function startMic() {
   }
   state.lastAudioAt = state.lastSoundAt = Date.now() / 1000;
   state.recording = true;
-  $('mic').setAttribute('aria-pressed', 'true');
-  $('mic').setAttribute('aria-label', 'Stoppa mikrofonen');
-  $('empty')?.remove();
+  setMicButton();
+  renderSummaries();
   requestWakeLock();
   setStatus();
 }
@@ -345,8 +354,8 @@ async function stopMic() {
   log('Mikrofonen stoppad');
   const rest = state.chunker.flush(); // transkribera det som återstår
   if (rest?.voiced) enqueue(rest);
-  $('mic').setAttribute('aria-pressed', 'false');
-  $('mic').setAttribute('aria-label', 'Starta mikrofonen');
+  setMicButton();
+  renderSummaries();
   $('level').style.width = '0';
   state.wakeLock?.release().catch(() => {});
   state.wakeLock = null;
@@ -394,10 +403,20 @@ function watchdog() {
 
 // ---------------------------------------------------------------- Rendering
 
+function setMicButton() {
+  const on = state.recording;
+  $('mic').classList.toggle('recording', on);
+  $('mic-label').textContent = on ? 'Stoppa' : 'Starta';
+  $('mic-icon').setAttribute('href', on ? '#i-stop' : '#i-mic');
+}
+
 function renderCloud() {
   const terms = topics.cloudTerms();
-  if (terms.length) $('empty')?.remove();
+  $('empty').hidden = terms.length > 0;
   cloud.update(terms);
+  // Molnet är en bild för skärmläsare; samma innehåll finns som lista under.
+  const names = terms.filter((t) => t.kind === 'topic').map((t) => t.text);
+  $('cloud').setAttribute('aria-label', names.length ? `Ordmoln med ämnena: ${names.join(', ')}` : 'Ordmoln, inga ämnen ännu');
   renderSummaries();
 }
 
@@ -412,8 +431,15 @@ function renderSummaries() {
   const nowS = Date.now() / 1000;
   const card = $('now-card');
   const now = topics.now;
-  card.hidden = !now;
-  if (now) {
+  card.classList.toggle('waiting', !now);
+  if (!now) {
+    const waiting = state.recording
+      ? 'Lyssnar. Efter några meningar står det här vad samtalet handlar om.'
+      : 'Tryck på Starta och börja prata. Efter några meningar står det här vad samtalet handlar om.';
+    if (shownNow !== waiting) { shownNow = waiting; $('now-text').textContent = waiting; }
+    $('now-age').textContent = '';
+    card.classList.remove('stale');
+  } else {
     if (now.text !== shownNow) {
       shownNow = now.text;
       $('now-text').textContent = now.text;
@@ -466,7 +492,7 @@ function updateInfo() {
   if (busyFor > 3) parts.push(`skriver… ${Math.round(busyFor)} s`);
   $('info').textContent = parts.join(' · ');
   if (state.slowChunks >= 3 && state.asr.status === 'ready' && !settings.model.includes('tiny')) {
-    showWarning('Telefonen hinner inte transkribera i realtid. Välj KB-Whisper tiny under ⚙️.');
+    showWarning('Telefonen hinner inte transkribera i realtid. Välj KB-Whisper tiny under Inställningar.');
   }
 }
 
@@ -484,6 +510,7 @@ function renderAsr() {
     box.hidden = false;
     const p = a.progress;
     $('model-bar').style.width = `${p?.progress ?? 0}%`;
+    box.querySelector('[role=progressbar]').setAttribute('aria-valuenow', String(Math.round(p?.progress ?? 0)));
     $('model-text').textContent = p?.total
       ? `Laddar ${MODEL_NAMES[p.model] || p.model}: ${Math.round(p.progress)} % (${MB(p.loaded)} av ${MB(p.total)})`
       : 'Förbereder taligenkänningen…';
@@ -525,8 +552,8 @@ function renderLlm() {
       + (u.failed ? `, ${u.failed} misslyckade` : '') + '.'
     : '';
   setNotice(!llm.hasKey
-    ? 'Ordmolnet kommer från Claude. Ange din Anthropic API-nyckel under ⚙️. Transkriptet fungerar ändå.'
-    : !llm.enabled ? 'Ämnen med Claude är avslaget, så molnet är tomt. Slå på det under ⚙️.'
+    ? 'Ordmolnet kommer från Claude. Ange din Anthropic API-nyckel under Inställningar. Det som sägs skrivs ut ändå.'
+    : !llm.enabled ? 'Ämnen med Claude är avslaget, så molnet är tomt. Slå på det under Inställningar.'
       : llm.status === 'error' ? `Claude svarade med ett fel: ${llm.reason}` : '');
 }
 
@@ -536,6 +563,9 @@ function showWarning(text) { $('warning').textContent = text; $('warning').hidde
 // ---------------------------------------------------------------- Inställningar
 
 function applySettingsToUi() {
+  $('theme').value = settings.theme;
+  $('text-size').value = settings.textSize;
+  $('reduce-motion').checked = settings.reduceMotion;
   $('half-life').value = settings.halfLife;
   $('half-life-out').textContent = `${settings.halfLife} s`;
   $('top-n').value = settings.maxWords;
@@ -584,6 +614,20 @@ $('asr-model').addEventListener('change', (e) => {
     restartWorker('Bytt modell');
     state.workerRestarts = 0;
   }
+});
+
+for (const [id, key] of [['theme', 'theme'], ['text-size', 'textSize']]) {
+  $(id).addEventListener('change', (e) => {
+    settings[key] = e.target.value;
+    saveSettings();
+    applyAppearance();
+    cloud.layout(true); // textstorleken påverkar molnets mått
+  });
+}
+$('reduce-motion').addEventListener('change', (e) => {
+  settings.reduceMotion = e.target.checked;
+  saveSettings();
+  applyAppearance();
 });
 
 $('show-summaries').addEventListener('change', (e) => {
@@ -696,7 +740,9 @@ $('mic').addEventListener('click', () => (state.recording ? stopMic() : startMic
 
 applySettingsToUi();
 setStatus();
+setMicButton();
 renderLlm();
+renderSummaries();
 setInterval(maybeRefreshTopics, 1000);
 setInterval(watchdog, WATCHDOG_MS);
 setInterval(() => { if (topics.topics.size || topics.now) renderCloud(); renderLlm(); }, 2000);

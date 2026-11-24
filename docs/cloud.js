@@ -32,6 +32,11 @@ export class WordCloud {
     this.font = getComputedStyle(container).fontFamily || 'sans-serif';
     this.ro = new ResizeObserver(() => this.layout(true));
     this.ro.observe(container);
+    // Mät om när typsnittet har laddats, annars blir ordens bredd fel.
+    document.fonts?.ready.then(() => {
+      this.font = getComputedStyle(container).fontFamily || this.font;
+      this.layout(true);
+    });
   }
 
   update(terms) {
