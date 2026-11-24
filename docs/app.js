@@ -6,6 +6,12 @@ import { TopicLayer } from './topics.js';
 
 const $ = (id) => document.getElementById(id);
 const MAX_BACKLOG = 3;            // fler väntande bitar än så = vi ligger efter, släng de äldsta
+// en bit som tar längre tid än så: Whisper har hängt sig (testerna kan korta tiden)
+const TRANSCRIBE_TIMEOUT_S = window.__TALMOLN_TIMEOUT_S__ || 45;
+const AUDIO_SILENT_S = 4;         // inga ljudblock på så länge: mikrofonen har stannat
+const AUDIO_ZERO_S = 6;           // bara exakta nollor så länge: mikrofonen levererar inget
+const AUDIO_RESTART_GAP_S = 20;   // starta inte om mikrofonen oftare än så
+const WATCHDOG_MS = 2000;
 const FALLBACK_MODELS = ['onnx-community/whisper-base', 'Xenova/whisper-base'];
 const KEY_STORAGE = 'talmoln.apiKey';
 const SETTINGS_STORAGE = 'talmoln.settings';
@@ -53,7 +59,28 @@ const state = {
   startedAt: Date.now() / 1000,
   lastLatency: null,
   asr: { worker: null, status: 'idle', model: null, device: null, error: null },
+  busySince: 0,
+  lastAudioAt: 0,
+  lastSoundAt: 0,       // senaste block som inte var helt tyst (en riktig mikrofon brusar alltid)
+  lastAudioRestart: 0,
+  restarting: false,
+  workerRestarts: 0,
+  slowChunks: 0,        // bitar i rad som tog längre tid att transkribera än de var långa
+  log: [],
 };
+
+// ---------------------------------------------------------------- Diagnostik
+
+function log(msg) {
+  const line = `${new Date().toTimeString().slice(0, 8)} ${msg}`;
+  console.info('[talmoln]', msg);
+  state.log.push(line);
+  if (state.log.length > 200) state.log.shift();
+  const el = $('diag-log');
+  if (el && $('settings').open) el.textContent = state.log.slice(-60).join('\n');
+}
+window.addEventListener('error', (e) => log(`Fel: ${e.message}`));
+window.addEventListener('unhandledrejection', (e) => log(`Fel: ${e.reason?.message || e.reason}`));
 
 // ---------------------------------------------------------------- Whisper
 
@@ -67,16 +94,42 @@ function ensureModel() {
   if (state.asr.worker) return;
   const worker = createWorker();
   state.asr = { worker, status: 'loading', model: settings.model, device: null, error: null };
-  worker.onmessage = ({ data }) => onWorkerMessage(data);
+  log(`Laddar Whisper (${settings.model})`);
+  worker.onmessage = ({ data }) => { if (state.asr.worker === worker) onWorkerMessage(data); };
   worker.onerror = (e) => {
+    if (state.asr.worker !== worker) return;
+    e.preventDefault?.();
+    if (state.asr.status === 'ready') {
+      // Kraschade mitt i (t.ex. slut på minne): starta om, modellen finns i cachen.
+      restartWorker(`Whisper-workern kraschade: ${e.message || 'okänt fel'}`);
+      return;
+    }
     state.asr.status = 'error';
     // Vanligaste orsaken: biblioteket kunde inte hämtas från jsDelivr (inget nät).
     state.asr.error = e.message || 'kunde inte hämta transformers.js från cdn.jsdelivr.net';
+    log(`Whisper kunde inte starta: ${state.asr.error}`);
     renderAsr();
   };
   const models = [settings.model, ...FALLBACK_MODELS.filter((m) => m !== settings.model)];
   worker.postMessage({ type: 'load', models, device: 'auto' });
   renderAsr();
+}
+
+/** Släng en hängd eller kraschad worker och starta en ny. Bitar i kön behålls. */
+function restartWorker(reason) {
+  log(`${reason} – startar om Whisper`);
+  state.workerRestarts++;
+  try { state.asr.worker?.terminate?.(); } catch { /* redan död */ }
+  state.asr.worker = null;
+  state.busy = false;
+  state.pending.clear();
+  if (state.workerRestarts > 3) {
+    state.asr.status = 'error';
+    state.asr.error = 'Whisper har hängt sig flera gånger. Välj KB-Whisper tiny under ⚙️ och ladda om sidan.';
+    renderAsr();
+    return;
+  }
+  ensureModel();
 }
 
 function onWorkerMessage(msg) {
@@ -85,14 +138,16 @@ function onWorkerMessage(msg) {
     renderAsr();
   } else if (msg.type === 'ready') {
     Object.assign(state.asr, { status: 'ready', model: msg.model, device: msg.device, fallback: msg.fallback });
-    console.info('Whisper redo:', msg.model, msg.device, msg.dtype, msg.errors);
+    log(`Whisper redo: ${msg.model} på ${msg.device} (${JSON.stringify(msg.dtype)})`);
+    for (const e of msg.errors || []) log(`  provade först: ${e}`);
     renderAsr();
     pump();
   } else if (msg.type === 'error' && msg.stage === 'load') {
     Object.assign(state.asr, { status: 'error', error: msg.message });
+    log(`Whisper kunde inte laddas: ${msg.message}`);
     renderAsr();
   } else if (msg.type === 'error') {
-    console.warn('Transkribering misslyckades:', msg.message);
+    log(`Transkribering misslyckades: ${msg.message}`);
     state.pending.delete(msg.id);
     state.busy = false;
     pump();
@@ -106,7 +161,7 @@ function enqueue(chunk) {
   state.queue.push(chunk);
   while (state.queue.length > MAX_BACKLOG) {
     state.queue.shift();
-    console.warn('Transkriberingen ligger efter – hoppar över en bit');
+    log('Transkriberingen ligger efter – hoppar över en bit');
   }
   pump();
   updateInfo();
@@ -118,15 +173,22 @@ function pump() {
   const id = state.nextId++;
   state.pending.set(id, chunk);
   state.busy = true;
+  state.busySince = Date.now() / 1000;
   state.asr.worker.postMessage({ type: 'transcribe', id, audio: chunk.samples }, [chunk.samples.buffer]);
   updateInfo();
 }
 
-function onTranscript({ id, text }) {
+function onTranscript({ id, text, ms }) {
   const chunk = state.pending.get(id);
   state.pending.delete(id);
   state.busy = false;
+  state.workerRestarts = 0;
   if (chunk) {
+    // Hinner telefonen med? Tar en bit längre tid än den är lång växer kön.
+    state.slowChunks = ms > chunk.durationS * 1000 ? state.slowChunks + 1 : 0;
+    if (state.slowChunks === 3) {
+      log(`Whisper är för långsam: ${(ms / 1000).toFixed(1)} s för ${chunk.durationS.toFixed(1)} s ljud`);
+    }
     state.lastLatency = Math.round((Date.now() / 1000 - chunk.receivedAt) * 1000);
     const clean = cleanText(text || '');
     if (clean) {
@@ -163,22 +225,11 @@ async function maybeRefreshTopics() {
 
 // ---------------------------------------------------------------- Mikrofon
 
-async function startMic() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    showWarning('Mikrofonen är inte tillgänglig. Sidan måste öppnas via https:// (t.ex. GitHub Pages) eller localhost.');
-    return;
-  }
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    });
-  } catch (err) {
-    showWarning(`Fick inte använda mikrofonen: ${err.message}`);
-    return;
-  }
-  ensureModel();
-
+/** Öppna mikrofonen och ljudgrafen. Kastar vid fel. */
+async function openAudio() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+  });
   let ctx;
   try { ctx = new AudioContext({ sampleRate: 16000 }); } catch { ctx = new AudioContext(); }
   if (ctx.state === 'suspended') await ctx.resume();
@@ -186,6 +237,8 @@ async function startMic() {
   const source = ctx.createMediaStreamSource(stream);
   const node = new AudioWorkletNode(ctx, 'pcm-processor');
   node.port.onmessage = ({ data }) => {
+    state.lastAudioAt = Date.now() / 1000;
+    if (data.level > 0) state.lastSoundAt = state.lastAudioAt;
     for (const chunk of state.chunker.feed(data.pcm)) if (chunk.voiced) enqueue(chunk);
     $('level').style.width = `${Math.min(100, Math.sqrt(data.level) * 180)}%`;
   };
@@ -194,7 +247,66 @@ async function startMic() {
   mute.gain.value = 0;
   source.connect(node).connect(mute).connect(ctx.destination);
 
-  state.audio = { ctx, stream, node };
+  // Android kan pausa ljudet (skärmen släckt, samtal, annan app tar mikrofonen).
+  ctx.onstatechange = () => {
+    log(`Ljudet: ${ctx.state}`);
+    if (state.recording && ctx.state !== 'running' && ctx.state !== 'closed' && document.visibilityState === 'visible') {
+      ctx.resume().catch(() => {});
+    }
+    setStatus();
+  };
+  for (const track of stream.getAudioTracks()) {
+    track.onended = () => { log('Mikrofonen stängdes av systemet'); if (state.recording) restartAudio('mikrofonen stängdes'); };
+    track.onmute = () => log('Mikrofonen tystades av systemet');
+    track.onunmute = () => log('Mikrofonen är tillbaka');
+  }
+  log(`Mikrofonen öppnad (${ctx.sampleRate} Hz)`);
+  return { ctx, stream, node };
+}
+
+async function closeAudio(a) {
+  if (!a) return;
+  a.node.port.onmessage = null;
+  a.ctx.onstatechange = null;
+  for (const t of a.stream.getTracks()) { t.onended = null; t.stop(); }
+  try { await a.ctx.close(); } catch { /* redan stängd */ }
+}
+
+/** Stäng och öppna mikrofonen igen. Ljud som redan samlats behålls. */
+async function restartAudio(reason) {
+  if (state.restarting || !state.recording) return;
+  state.restarting = true;
+  state.lastAudioRestart = Date.now() / 1000;
+  log(`Startar om mikrofonen (${reason})`);
+  const old = state.audio;
+  state.audio = null;
+  await closeAudio(old);
+  try {
+    state.audio = await openAudio();
+    state.lastAudioAt = state.lastSoundAt = Date.now() / 1000;
+  } catch (err) {
+    log(`Kunde inte öppna mikrofonen igen: ${err.message}`);
+    showWarning(`Mikrofonen stannade och kunde inte startas igen (${err.message}). Tryck på 🎙️.`);
+    await stopMic();
+  } finally {
+    state.restarting = false;
+  }
+}
+
+async function startMic() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showWarning('Mikrofonen är inte tillgänglig. Sidan måste öppnas via https:// (t.ex. GitHub Pages) eller localhost.');
+    return;
+  }
+  ensureModel();
+  try {
+    state.audio = await openAudio();
+  } catch (err) {
+    log(`Fick inte använda mikrofonen: ${err.message}`);
+    showWarning(`Fick inte använda mikrofonen: ${err.message}`);
+    return;
+  }
+  state.lastAudioAt = state.lastSoundAt = Date.now() / 1000;
   state.recording = true;
   $('mic').setAttribute('aria-pressed', 'true');
   $('mic').setAttribute('aria-label', 'Stoppa mikrofonen');
@@ -207,11 +319,8 @@ async function stopMic() {
   const a = state.audio;
   state.audio = null;
   state.recording = false;
-  if (a) {
-    a.node.port.onmessage = null;
-    a.stream.getTracks().forEach((t) => t.stop());
-    await a.ctx.close();
-  }
+  await closeAudio(a);
+  log('Mikrofonen stoppad');
   const rest = state.chunker.flush(); // transkribera det som återstår
   if (rest?.voiced) enqueue(rest);
   $('mic').setAttribute('aria-pressed', 'false');
@@ -223,11 +332,43 @@ async function stopMic() {
 }
 
 async function requestWakeLock() {
-  try { state.wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* inte kritiskt */ }
+  try {
+    state.wakeLock = await navigator.wakeLock?.request('screen');
+    state.wakeLock?.addEventListener('release', () => { state.wakeLock = null; });
+  } catch (err) {
+    log(`Kunde inte hålla skärmen tänd: ${err.message}`);
+  }
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.recording && !state.wakeLock) requestWakeLock();
+  log(document.visibilityState === 'visible' ? 'Sidan syns igen' : 'Sidan dold (skärmen släckt eller annan app)');
+  if (document.visibilityState === 'visible' && state.recording) {
+    if (!state.wakeLock) requestWakeLock();
+    const ctx = state.audio?.ctx;
+    if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    state.lastAudioAt = state.lastSoundAt = Date.now() / 1000; // ge ljudet en chans innan vakten slår till
+  }
+  setStatus();
 });
+
+// Vakten: upptäcker att mikrofonen eller Whisper har stannat och startar om dem.
+function watchdog() {
+  const now = Date.now() / 1000;
+  if (state.recording && state.audio && !state.restarting && document.visibilityState === 'visible') {
+    const track = state.audio.stream.getAudioTracks()[0];
+    if (!track || track.readyState === 'ended') {
+      restartAudio('mikrofonspåret är stängt');
+    } else if (now - state.lastAudioAt > AUDIO_SILENT_S) {
+      restartAudio(`inga ljudblock på ${Math.round(now - state.lastAudioAt)} s`);
+    } else if (now - state.lastSoundAt > AUDIO_ZERO_S && now - state.lastAudioRestart > AUDIO_RESTART_GAP_S) {
+      restartAudio(`mikrofonen har bara gett tystnad i ${Math.round(now - state.lastSoundAt)} s${track.muted ? ' (tystad av systemet)' : ''}`);
+    }
+  }
+  if (state.busy && now - state.busySince > TRANSCRIBE_TIMEOUT_S) {
+    restartWorker(`En transkribering har tagit över ${TRANSCRIBE_TIMEOUT_S} s`);
+  }
+  updateInfo();
+  setStatus();
+}
 
 // ---------------------------------------------------------------- Rendering
 
@@ -247,9 +388,11 @@ function addSegment(text) {
 }
 
 function setStatus() {
+  const paused = state.recording && (document.visibilityState !== 'visible'
+    || (state.audio && state.audio.ctx.state !== 'running') || state.restarting);
   $('status').classList.add('online');
-  $('status').classList.toggle('recording', state.recording);
-  $('status-text').textContent = state.recording ? 'Lyssnar' : 'Redo';
+  $('status').classList.toggle('recording', state.recording && !paused);
+  $('status-text').textContent = !state.recording ? 'Redo' : paused ? 'Pausad' : 'Lyssnar';
 }
 
 function updateInfo() {
@@ -257,7 +400,12 @@ function updateInfo() {
   if (state.lastLatency != null) parts.push(`${(state.lastLatency / 1000).toFixed(1)} s`);
   const backlog = state.queue.length + (state.busy ? 1 : 0);
   if (backlog > 1) parts.push(`kö ${backlog}`);
+  const busyFor = state.busy ? Date.now() / 1000 - state.busySince : 0;
+  if (busyFor > 3) parts.push(`skriver… ${Math.round(busyFor)} s`);
   $('info').textContent = parts.join(' · ');
+  if (state.slowChunks >= 3 && state.asr.status === 'ready' && !settings.model.includes('tiny')) {
+    showWarning('Telefonen hinner inte transkribera i realtid. Välj KB-Whisper tiny under ⚙️.');
+  }
 }
 
 const MB = (b) => `${Math.round(b / 1e6)} MB`;
@@ -366,11 +514,10 @@ $('asr-model').addEventListener('change', (e) => {
   saveSettings();
   if (state.asr.worker) {
     // Byt modell: starta en ny worker. Ljud som väntar ligger kvar i kön.
-    state.asr.worker.terminate?.();
-    state.asr.worker = null;
-    state.busy = false;
-    state.pending.clear();
-    ensureModel();
+    state.workerRestarts = 0;
+    state.slowChunks = 0;
+    restartWorker('Bytt modell');
+    state.workerRestarts = 0;
   }
 });
 
@@ -404,8 +551,24 @@ $('forget-key').addEventListener('click', () => {
   saveKey();
 });
 
-$('settings-btn').addEventListener('click', () => { applySettingsToUi(); $('settings').showModal(); });
-$('llm').addEventListener('click', () => { applySettingsToUi(); $('settings').showModal(); });
+function openSettings() {
+  applySettingsToUi();
+  $('diag-log').textContent = state.log.slice(-60).join('\n') || '(inget ännu)';
+  $('settings').showModal();
+}
+$('settings-btn').addEventListener('click', openSettings);
+$('llm').addEventListener('click', openSettings);
+$('copy-log').addEventListener('click', async () => {
+  const text = [
+    `Talmoln ${new Date().toISOString()}`,
+    `Webbläsare: ${navigator.userAgent}`,
+    `Whisper: ${state.asr.model} på ${state.asr.device} (${state.asr.status})`,
+    `Kö: ${state.queue.length}, upptagen: ${state.busy}, ljud: ${state.audio?.ctx.state || '-'}`,
+    '', ...state.log,
+  ].join('\n');
+  try { await navigator.clipboard.writeText(text); $('copy-log').textContent = 'Kopierat!'; } catch { $('copy-log').textContent = 'Kunde inte kopiera'; }
+  setTimeout(() => { $('copy-log').textContent = 'Kopiera loggen'; }, 2000);
+});
 
 $('reset').addEventListener('click', () => {
   if (!confirm('Nollställa transkript och ordmoln?')) return;
@@ -454,4 +617,5 @@ applySettingsToUi();
 setStatus();
 renderLlm();
 setInterval(maybeRefreshTopics, 1000);
+setInterval(watchdog, WATCHDOG_MS);
 setInterval(() => { if (topics.topics.size) renderCloud(); renderLlm(); }, 2000);
