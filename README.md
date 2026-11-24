@@ -23,6 +23,7 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 - **Ämnen med förklaring**: varje ämne får ett kort namn och en mening om vad som sägs, till exempel *Kontorsflytten – Flytten till nya kontoret blir i mars.*
 - **Ordmoln**: ämnesnamnen, i samma färg som i listan. Storleken motsvarar hur mycket det pratas om ämnet just nu. Ämnenas nyckelord kan visas runt omkring (av som standard, för att hålla det lugnt).
 - **Tidsavklingning**: gamla ämnen tonar ut så att molnet visar det som pågår nu.
+- **Sparas på enheten**: samtalet (det som sagts, ämnena och Just nu) sparas i webbläsarens `localStorage` och finns kvar om sidan laddas om. *Inställningar → Data → Nollställ samtalet* tar bort det.
 
 Inte i scope: talaridentifiering, konton eller delning, analys av retorik.
 
@@ -146,7 +147,7 @@ Systemprompten (`docs/topics.js`) säger att texten är till för en person med 
 ├── README.md
 ├── package.json              # npm test
 ├── .github/workflows/
-│   ├── pages.yml             # push till main: tester → publicera docs/ till GitHub Pages
+│   ├── pages.yml             # push till main: tester → uppladdning → publicering (med ett omförsök)
 │   └── test.yml              # tester på andra grenar och pull requests
 ├── docs/                     # webbappen (GitHub Pages)
 │   ├── index.html, style.css

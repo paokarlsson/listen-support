@@ -159,3 +159,20 @@ test('nyckelord visas inte i molnet som standard', () => {
   layer.apply({ now: 'x', topics: [{ label: 'Budget', summary: 's', weight: 1, keywords: ['budgeten'] }] }, 1000);
   assert.deepEqual(layer.cloudTerms().map((r) => r.text), ['Budget']);
 });
+
+test('ämnena kan sparas och återställas (överlever omladdning)', () => {
+  const { layer } = layerWith(null, { halfLifeSeconds: 60 });
+  layer.apply({ now: 'Ni pratar om budgeten.', topics: [{ label: 'Budget', summary: 'Budgeten är tight.', weight: 1, keywords: ['budgeten'] }] }, 1000);
+  layer.usage.calls = 3;
+  const saved = JSON.parse(JSON.stringify(layer.serialize()));
+  const { layer: fresh } = layerWith(null, { halfLifeSeconds: 60 });
+  fresh.restore(saved);
+  assert.deepEqual(fresh.now, { text: 'Ni pratar om budgeten.', at: 1000 });
+  const [t] = fresh.current(1060);
+  assert.equal(t.label, 'Budget');
+  assert.equal(t.summary, 'Budgeten är tight.');
+  assert.ok(Math.abs(t.score - 0.5) < 1e-9); // avklingningen fortsätter från sparad tid
+  assert.equal(fresh.usage.calls, 3);
+  fresh.restore({ topics: [{ label: '', score: 'x' }] });
+  assert.equal(fresh.topics.size, 0); // trasig data ignoreras
+});

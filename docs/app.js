@@ -15,6 +15,8 @@ const WATCHDOG_MS = 2000;
 const FALLBACK_MODELS = ['onnx-community/whisper-base', 'Xenova/whisper-base'];
 const KEY_STORAGE = 'talmoln.apiKey';
 const SETTINGS_STORAGE = 'talmoln.settings';
+const SESSION_STORAGE = 'talmoln.session';  // samtalet, så att det överlever en omladdning
+const MAX_SAVED_SEGMENTS = 1000;
 
 // ---------------------------------------------------------------- Lagring
 
@@ -212,6 +214,7 @@ function onTranscript({ id, text, ms }) {
       state.segments.push({ text: clean, at: chunk.receivedAt, durationS: chunk.durationS, latencyMs: state.lastLatency });
       state.wordsSinceTopics += countWords(clean);
       addSegment(clean);
+      saveSession();
     }
   }
   updateInfo();
@@ -253,7 +256,55 @@ async function maybeRefreshTopics() {
   await req;
   renderCloud();
   renderLlm();
+  saveSession();
 }
+
+// ---------------------------------------------------------------- Spara samtalet
+
+let saveTimer = null;
+/** Spara samtalet i webbläsaren (fördröjt, så att det inte sker för ofta). */
+function saveSession(immediately = false) {
+  clearTimeout(saveTimer);
+  if (!immediately) { saveTimer = setTimeout(() => saveSession(true), 500); return; }
+  let segments = state.segments.slice(-MAX_SAVED_SEGMENTS);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const data = {
+      v: 1, savedAt: Date.now() / 1000, startedAt: state.startedAt,
+      wordsSinceTopics: state.wordsSinceTopics, segments, topics: topics.serialize(),
+    };
+    try {
+      window.localStorage.setItem(SESSION_STORAGE, JSON.stringify(data));
+      return;
+    } catch (err) {
+      // Fullt: spara färre av de äldsta meningarna.
+      if (!segments.length) { log(`Kunde inte spara samtalet: ${err.message}`); return; }
+      segments = segments.slice(Math.floor(segments.length / 2));
+    }
+  }
+}
+
+function restoreSession() {
+  let data;
+  try { data = JSON.parse(window.localStorage.getItem(SESSION_STORAGE) || 'null'); } catch { data = null; }
+  if (!data || data.v !== 1) return;
+  state.segments = Array.isArray(data.segments) ? data.segments.filter((x) => typeof x?.text === 'string') : [];
+  if (Number.isFinite(data.startedAt)) state.startedAt = data.startedAt;
+  state.wordsSinceTopics = Number(data.wordsSinceTopics) || 0;
+  topics.restore(data.topics);
+  for (const seg of state.segments.slice(-50)) addSegment(seg.text);
+  renderCloud();
+  if (state.segments.length || topics.topics.size) {
+    log(`Samtalet återställt: ${state.segments.length} meningar, ${topics.topics.size} ämnen`);
+  }
+}
+
+function clearSession() {
+  clearTimeout(saveTimer);
+  store.del('localStorage', SESSION_STORAGE);
+}
+
+// Spara direkt när sidan stängs eller laddas om.
+window.addEventListener('pagehide', () => saveSession(true));
 
 // ---------------------------------------------------------------- Mikrofon
 
@@ -602,6 +653,7 @@ $('llm-enabled').addEventListener('change', (e) => {
   topics.setEnabled(e.target.checked);
   renderCloud();
   renderLlm();
+  saveSession();
 });
 
 $('asr-model').addEventListener('change', (e) => {
@@ -692,7 +744,8 @@ $('copy-log').addEventListener('click', async () => {
 });
 
 $('reset').addEventListener('click', () => {
-  if (!confirm('Nollställa transkript och ordmoln?')) return;
+  if (!confirm('Nollställa samtalet? Det som sagts, ämnena och Just nu tas bort från den här enheten.')) return;
+  clearSession();
   state.segments = [];
   state.wordsSinceTopics = 0;
   state.queue = [];
@@ -702,6 +755,7 @@ $('reset').addEventListener('click', () => {
   cloud.clear();
   renderSummaries();
   renderLlm();
+  log('Samtalet nollställt');
   $('settings').close();
 });
 
@@ -739,6 +793,7 @@ $('mic').addEventListener('click', () => (state.recording ? stopMic() : startMic
 // ---------------------------------------------------------------- Start
 
 applySettingsToUi();
+restoreSession();
 setStatus();
 setMicButton();
 renderLlm();

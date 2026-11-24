@@ -16,7 +16,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
+  # Tester och uppladdning av docs/ i ett jobb, publicering i ett annat (som GitHubs mall).
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,18 +25,26 @@ jobs:
         with:
           node-version: 22
       - run: npm test
-
-  deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v7
       - uses: actions/configure-pages@v5
+      # upload-pages-artifact@v5 laddar upp paketet så att deploy-pages@v5 inte hittar det.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+    steps:
+      # deploy-pages hittar ibland inte paketet direkt efter uppladdningen
+      # ("No artifacts named github-pages were found"). Då försöker vi igen.
       - id: deployment
+        uses: actions/deploy-pages@v5
+        continue-on-error: true
+      - if: steps.deployment.outcome == 'failure'
+        run: sleep 30
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v5

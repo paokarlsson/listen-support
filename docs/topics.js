@@ -186,6 +186,31 @@ export class TopicLayer {
     return out.sort((a, b) => b.score - a.score);
   }
 
+  /** Allt som behövs för att återställa ämnena efter en omladdning av sidan. */
+  serialize() {
+    return {
+      topics: [...this.topics.values()].map((t) => ({ ...t })),
+      now: this.now,
+      lastSuccess: this.lastSuccess,
+      usage: { ...this.usage },
+    };
+  }
+
+  restore(data) {
+    if (!data || !Array.isArray(data.topics)) return;
+    this.topics.clear();
+    for (const t of data.topics) {
+      if (!t?.label || !Number.isFinite(t.score) || !Number.isFinite(t.updated)) continue;
+      this.topics.set(norm(t.label), {
+        label: t.label, score: t.score, updated: t.updated,
+        keywords: Array.isArray(t.keywords) ? t.keywords : [], summary: t.summary || '',
+      });
+    }
+    this.now = data.now?.text ? { text: data.now.text, at: data.now.at } : null;
+    this.lastSuccess = Number.isFinite(data.lastSuccess) ? data.lastSuccess : null;
+    if (data.usage) this.usage = { ...this.usage, ...data.usage };
+  }
+
   /** Det som visas i molnet: ämnesnamn som stora ord och ämnenas ord runt omkring. */
   cloudTerms(now = this.clock()) {
     const topics = this.enabled ? this.current(now) : [];
