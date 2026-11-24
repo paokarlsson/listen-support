@@ -6,6 +6,42 @@ Ljudet stannar **på telefonen**: en Python-server i Termux transkriberar lokalt
 
 ---
 
+## Två sätt att köra
+
+| | **Webbversionen** (`docs/`) – rekommenderas | **Termux-servern** (`app/`) – reserv |
+|---|---|---|
+| Installation | Ingen. Öppna sidan i Chrome | Termux, Python, bygge av whisper.cpp |
+| Whisper körs | I webbläsaren (transformers.js, WebGPU eller WebAssembly) | I Termux (whisper.cpp, snabbare på CPU) |
+| Modellen | Laddas ner från Hugging Face första gången, sparas sedan i webbläsaren | Laddas ner med `scripts/download_model.sh` |
+| API-nyckeln | Anges i appens inställningar och sparas i webbläsaren | `.env` på telefonen |
+
+### Webbversionen: kom igång
+
+1. **Slå på GitHub Pages:** på GitHub, gå till repot → **Settings** → **Pages**. Under *Build and deployment*, välj *Source* **Deploy from a branch**, välj grenen `ccr-a5a1c1f9-s7n6r9` och mappen **`/docs`**, och tryck **Save**. Efter någon minut ligger sidan på **https://paokarlsson.github.io/listen-support/**.
+2. **Öppna sidan i Chrome på telefonen**, tryck på ⚙️ och klistra in din Anthropic API-nyckel. Tryck **Testa** för att kontrollera den. Nyckeln skapar du på console.anthropic.com under *API Keys*.
+3. **Tryck på 🎙️** och tillåt mikrofonen. Första gången laddas Whisper-modellen ner, och en förloppsindikator visas. Sedan finns den kvar i webbläsaren.
+
+**Om nyckeln:** den sparas bara i den här webbläsaren (eller bara tills fliken stängs, om du bockar ur *Kom ihåg*). Den skickas bara till `api.anthropic.com`, aldrig till GitHub. En nyckel i en webbläsare kan i princip läsas av skript på sidan, så skapa en egen nyckel med en låg utgiftsgräns i Anthropic Console. Anropen görs med headern `anthropic-dangerous-direct-browser-access: true`, som Anthropic kräver för anrop direkt från en webbsida.
+
+**Vad som går över nätet i webbversionen:**
+
+| Vad | Till | När |
+|---|---|---|
+| Sidan själv | GitHub Pages | Vid varje besök |
+| Whisper-modellen | Hugging Face (`huggingface.co`) | Första gången, sedan från webbläsarens cache |
+| transformers.js 4.3.2 och ONNX Runtime | jsDelivr (`cdn.jsdelivr.net`), låst version | Första gången, sedan från cache |
+| Transkriberad text (aldrig ljud) | Anthropic (`api.anthropic.com`) | Ungefär var 20:e sekund medan du pratar |
+
+Ljudet lämnar aldrig telefonen. `tests/test_local_only.py` kontrollerar att vår egen kod inte anropar något annat än Anthropic och jsDelivr. (Biblioteket ligger inte i repot, eftersom GitHubs skanner tar ett modellnamn i det för en API-nyckel och stoppar pushen.)
+
+**Modell:** standard är KB-Whisper base (`KBLab/kb-whisper-base`). Om den inte går att ladda i webbläsaren, till exempel för att KBLab inte publicerat den i ONNX-format, byter appen automatiskt till OpenAI:s Whisper base och säger det. I inställningarna kan du välja KB-Whisper tiny eller OpenAI:s modeller.
+
+**Hastighet:** med WebGPU (finns i Chrome på många nyare Android-telefoner) körs Whisper på grafikprocessorn. Annars används WebAssembly på processorn. GitHub Pages kan inte skicka de headers som krävs för flertrådad WebAssembly, så då körs den i en tråd, vilket är långsammare. Ligger transkriberingen efter visas "kö N" nere till höger. Välj då KB-Whisper tiny i inställningarna.
+
+**Testa webbkoden:** `node --test tests/web/*.test.mjs`
+
+---
+
 ## 1. Vad det gör
 
 - **Live-transkribering** av tal (svenska i första hand) med Whisper (whisper.cpp).
@@ -102,7 +138,14 @@ Nätet behövs bara en gång vid installationen: `pkg`, `pip`, `git clone` och n
 │   ├── audio.py              # PCM-buffert, chunkning vid tystnad, energibaserad VAD
 │   ├── transcriber.py        # whisper.cpp (pywhispercpp), whisper-cli eller stub
 │   └── topics.py             # ämneslager: anropar Claude, tolkar svaret, bygger molnet
-├── static/
+├── docs/                     # webbversionen (GitHub Pages)
+│   ├── index.html, style.css
+│   ├── app.js                # mic → worklet → chunkning → Whisper-worker → Claude → moln
+│   ├── asr-worker.js         # Whisper i en Web Worker (transformers.js)
+│   ├── chunker.js            # chunkning vid tystnad, VAD, hallucinationsfilter
+│   ├── topics.js             # ämneslagret, anropar Claude direkt från webbläsaren
+│   └── cloud.js, pcm-worklet.js
+├── static/                   # webbsidan för Termux-servern
 │   ├── index.html
 │   ├── app.js                # mic → worklet → websocket, rendering, inställningar
 │   ├── cloud.js              # ordmolnet
@@ -112,6 +155,7 @@ Nätet behövs bara en gång vid installationen: `pkg`, `pip`, `git clone` och n
     ├── test_audio.py
     ├── test_topics.py        # ämneslagret, med låtsas-API
     ├── test_local_only.py    # inget utom Anthropic-anropen går över nätet
+    └── web/                  # tester för webbversionen (node --test)
     └── test_server.py
 ```
 
@@ -208,7 +252,7 @@ Om transkriberingen inte hinner med släpps de äldsta bitarna när fler än 3 v
 
 ---
 
-## 7. Kom igång på Android (Termux)
+## 7. Termux-servern (reserv): kom igång
 
 > Installera Termux från **F-Droid**. Versionen på Play Store är föråldrad.
 
@@ -283,6 +327,7 @@ Utan modell startar servern ändå, i stub-läge, och sidan visar en varning. S�
 - [x] **Fas 3 – Ordmoln:** live-ordmoln med avklingning (den lokala nyckelordsmotorn är borttagen – molnet kommer från ämneslagret)
 - [x] **Fas 4 – Ämneslager:** Claude-anrop, sammanslagning, statusindikator, felhantering
 - [x] **Fas 5 – Finputs:** reglage för halveringstid/topp-N/LLM-intervall, reset, export, mjuka animationer
+- [x] **Webbversion:** allt i webbläsaren, nyckel i inställningarna, GitHub Pages (`docs/`)
 - [ ] **Fas 6 – Offline-läge (valfritt):** lokal LLM via llama.cpp som ersättning för Claude
 
 ---
