@@ -17,6 +17,10 @@ import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transfo
 env.allowLocalModels = false; // modeller hämtas alltid från Hugging Face (och cachas)
 env.useBrowserCache = true;
 
+// Flera trådar kräver cross-origin isolation (ordnas av coi-serviceworker.js).
+const MAX_THREADS = self.crossOriginIsolated ? Math.max(1, Math.min(4, (self.navigator?.hardwareConcurrency || 2) - 1)) : 1;
+env.backends.onnx.wasm.numThreads = MAX_THREADS;
+
 let asr = null;
 
 async function hasWebGPU() {
@@ -45,6 +49,8 @@ async function load(models, device) {
   const errors = [];
   for (const [i, model] of models.entries()) {
     for (const opt of attempts(dev)) {
+     for (const threads of opt.device === 'wasm' && MAX_THREADS > 1 ? [MAX_THREADS, 1] : [MAX_THREADS]) {
+      env.backends.onnx.wasm.numThreads = threads;
       try {
         asr = await pipeline('automatic-speech-recognition', model, {
           device: opt.device,
@@ -55,13 +61,18 @@ async function load(models, device) {
             }
           },
         });
-        self.postMessage({ type: 'ready', model, device: opt.device, dtype: opt.dtype, fallback: i > 0, errors });
+        self.postMessage({
+          type: 'ready', model, device: opt.device, dtype: opt.dtype, fallback: i > 0, errors,
+          threads: opt.device === 'wasm' ? threads : null,
+          isolated: !!self.crossOriginIsolated, cores: self.navigator?.hardwareConcurrency || null,
+        });
         return;
       } catch (err) {
-        const msg = `${model} (${opt.device}, ${JSON.stringify(opt.dtype)}): ${err?.message || err}`;
+        const msg = `${model} (${opt.device}, ${JSON.stringify(opt.dtype)}, ${threads} trådar): ${err?.message || err}`;
         console.warn('Kunde inte ladda', msg);
         errors.push(msg);
       }
+     }
     }
   }
   self.postMessage({ type: 'error', stage: 'load', message: errors.join('\n') });

@@ -155,8 +155,9 @@ function onWorkerMessage(msg) {
     state.asr.progress = msg;
     renderAsr();
   } else if (msg.type === 'ready') {
-    Object.assign(state.asr, { status: 'ready', model: msg.model, device: msg.device, fallback: msg.fallback });
-    log(`Whisper redo: ${msg.model} på ${msg.device} (${JSON.stringify(msg.dtype)})`);
+    Object.assign(state.asr, { status: 'ready', model: msg.model, device: msg.device, fallback: msg.fallback, threads: msg.threads });
+    log(`Whisper redo: ${msg.model} på ${msg.device} (${JSON.stringify(msg.dtype)})`
+      + (msg.device === 'wasm' ? `, ${msg.threads} trådar av ${msg.cores ?? '?'} kärnor, isolerad: ${msg.isolated ? 'ja' : 'nej'}` : ''));
     for (const e of msg.errors || []) log(`  provade först: ${e}`);
     renderAsr();
     pump();
@@ -222,17 +223,22 @@ function onTranscript({ id, text, ms }) {
   maybeRefreshTopics();
 }
 
-/** Korta bitar ger snabbare svar, men Whisper kostar ungefär lika mycket per bit oavsett
- *  längd. Hinner telefonen inte med görs bitarna längre, och kortare igen när den hinner. */
+/** Whisper räknar alltid på ett 30-sekundersfönster, så en bit kostar ungefär lika mycket
+ *  oavsett längd. Korta bitar ger snabbare svar på en snabb telefon; på en långsam telefon
+ *  måste bitarna vara minst så långa som det tar att transkribera dem, annars växer kön.
+ *  Därför sätts längden efter hur lång tid Whisper faktiskt tar (3–25 s). */
 const MIN_CHUNK_S = 3;
-const MAX_CHUNK_S = 8;
+const MAX_CHUNK_S = 25;
 function adaptChunkLength(tookS, durationS) {
   const cur = state.chunker.cfg.chunkSeconds;
   let next = cur;
-  if (tookS > durationS * 0.8) next = Math.min(MAX_CHUNK_S, cur + 1);
-  else if (tookS < durationS * 0.35) next = Math.max(MIN_CHUNK_S, cur - 0.5);
+  if (tookS > durationS * 0.8) {
+    next = Math.min(MAX_CHUNK_S, Math.max(cur + 1, Math.ceil(tookS * 1.3)));
+  } else if (tookS < durationS * 0.4 && cur > MIN_CHUNK_S) {
+    next = Math.max(MIN_CHUNK_S, Math.ceil(Math.max(tookS * 1.5, cur * 0.7)));
+  }
   if (next !== cur) {
-    state.chunker.setChunkSeconds(next, next + 3);
+    state.chunker.setChunkSeconds(next, Math.min(next + 3, 28));
     log(`Ljudbitar: ${next} s (Whisper tog ${tookS.toFixed(1)} s för ${durationS.toFixed(1)} s ljud)`);
   }
 }
@@ -542,7 +548,8 @@ function updateInfo() {
   const busyFor = state.busy ? Date.now() / 1000 - state.busySince : 0;
   if (busyFor > 3) parts.push(`skriver… ${Math.round(busyFor)} s`);
   $('info').textContent = parts.join(' · ');
-  if (state.slowChunks >= 3 && state.asr.status === 'ready' && !settings.model.includes('tiny')) {
+  if (state.slowChunks >= 3 && state.asr.status === 'ready' && !settings.model.includes('tiny')
+      && state.chunker.cfg.chunkSeconds >= MAX_CHUNK_S) {
     showWarning('Telefonen hinner inte transkribera i realtid. Välj KB-Whisper tiny under Inställningar.');
   }
 }
@@ -571,7 +578,8 @@ function renderAsr() {
   }
   if (a.status === 'ready') {
     const name = MODEL_NAMES[a.model] || a.model;
-    const where = a.device === 'webgpu' ? 'grafikprocessorn (WebGPU)' : 'processorn (WebAssembly)';
+    const where = a.device === 'webgpu' ? 'grafikprocessorn (WebGPU)'
+      : `processorn (WebAssembly, ${a.threads > 1 ? `${a.threads} kärnor` : '1 kärna'})`;
     $('asr-status').textContent = `Använder ${name} på ${where}.`;
     showWarning(a.fallback
       ? `${MODEL_NAMES[settings.model] || settings.model} gick inte att ladda i webbläsaren, så ${name} används i stället (sämre svenska).`

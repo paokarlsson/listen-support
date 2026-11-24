@@ -81,7 +81,9 @@ Kontrollerat automatiskt med axe-core (WCAG 2.0–2.2 A/AA) i ljust och mörkt t
 
 **Modell:** standard är **KB-Whisper base** (`KBLab/kb-whisper-base`), Kungliga bibliotekets svenska finjustering av Whisper. Den ger klart bättre svenska än OpenAI:s modeller i samma storlek. Om den inte går att ladda i webbläsaren, till exempel för att KBLab inte publicerat den i ONNX-format, byter appen automatiskt till OpenAI:s Whisper base och säger det. I inställningarna kan du välja KB-Whisper tiny eller OpenAI:s modeller.
 
-**Hastighet:** med WebGPU (finns i Chrome på många nyare Android-telefoner) körs Whisper på grafikprocessorn. Annars används WebAssembly på processorn. GitHub Pages kan inte skicka de headers som krävs för flertrådad WebAssembly, så då körs den i en tråd, vilket är långsammare. Fördröjningen visas nere till höger, och "kö N" om transkriberingen ligger efter. Välj då KB-Whisper tiny.
+**Hastighet:** med WebGPU (finns i Chrome på många nyare Android-telefoner) körs Whisper på grafikprocessorn. Annars används WebAssembly på processorn, med upp till 4 kärnor. GitHub Pages kan inte skicka de headers som flera trådar kräver (COOP/COEP), så `coi-serviceworker.js` (MIT) lägger till dem. Sidan laddas därför om en gång vid första besöket. Inställningar → Taligenkänning visar vad som används, och diagnostikloggen visar antal trådar.
+
+Whisper räknar alltid på ett 30-sekundersfönster, så en ljudbit kostar ungefär lika mycket oavsett längd. Appen mäter hur lång tid varje bit tar och sätter bitlängden därefter, mellan 3 och 25 s. En snabb telefon får korta bitar och snabba svar. En långsam får längre bitar, så att den hinner med men svarar senare. Hinner den inte ens med 25 s bitar visas en varning: välj då KB-Whisper tiny.
 
 Biblioteket är [transformers.js](https://github.com/huggingface/transformers.js) 4.3.2, som hämtas från jsDelivr låst till exakt den versionen. Det ligger inte i repot: GitHubs push-skydd tar modellnamnet `Mistral3ForConditionalGeneration` i biblioteket för en Mistral-nyckel och stoppar pushen.
 
