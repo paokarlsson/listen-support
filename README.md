@@ -19,11 +19,10 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 ## Vad det gör
 
 - **Live-transkribering** av svenska med Whisper, i webbläsaren.
-- **Just nu**: en mening överst på lättläst svenska om vad samtalet handlar om just nu, till exempel "Ni pratar om var ni ska åka på semester i sommar." Den visar också hur gammal den är.
 - **Ämnen med förklaring**: varje ämne får ett kort namn och en mening om vad som sägs, till exempel *Kontorsflytten – Flytten till nya kontoret blir i mars.*
-- **Ämnen med förklaring** är huvudinnehållet: stora kort med ämnets namn och en mening om vad som sägs. **Nyaste ämnet överst.** Ordningen styrs av när ämnet först dök upp, så listan hoppar inte runt. Det som pratas om just nu får märket *Pratas om nu*, övriga visar när de senast nämndes (*Nämndes för 3 minuter sedan*).
+- **Ämnen med förklaring** är huvudinnehållet: stora kort med ämnets namn och en mening om vad som sägs. **Nyaste ämnet överst.** Ordningen styrs av när ämnet först dök upp, så listan hoppar inte runt. Det som pratas om just nu får märket *Pratas om nu*, övriga visar när de senast nämndes (*Nämndes för 3 minuter sedan*). Sidan visar inget annat: det som sagts, fördröjningen och diagnostiken finns under Inställningar, och mikrofonknappen är diskret.
 - **Gamla ämnen försvinner** när de inte nämnts på 15 minuter (inställbart 5–60 minuter). Högst 8 ämnen visas (inställbart 3–12).
-- **Sparas på enheten**: samtalet (det som sagts, ämnena och Just nu) sparas i webbläsarens `localStorage` och finns kvar om sidan laddas om. *Inställningar → Data → Nollställ samtalet* tar bort det.
+- **Sparas på enheten**: samtalet (det som sagts och ämnena) sparas i webbläsarens `localStorage` och finns kvar om sidan laddas om. *Inställningar → Data → Nollställ samtalet* tar bort det.
 
 Inte i scope: talaridentifiering, konton eller delning, analys av retorik.
 
@@ -38,9 +37,9 @@ Gränssnittet följer **WCAG 2.2 nivå AA**, och nivå AAA där det går:
 - **Anpassningsbart** under Inställningar → Utseende: ljust eller mörkt tema (eller som telefonen), tre textstorlekar och *Minska rörelser*. Telefonens inställning för minskade rörelser följs också automatiskt.
 - **Stora pekytor:** minst 48 × 48 px.
 - **Tangentbord och skärmläsare:**
-  - En länk för att hoppa direkt till Just nu, och tydliga fokusmarkeringar.
+  - En länk för att hoppa direkt till ämnena, och tydliga fokusmarkeringar.
   - Rubriker och landmärken.
-  - "Just nu" läses upp när den ändras.
+  - Nya ämnen läses upp när de dyker upp.
   - Ämnena är en vanlig lista med rubriker, i samma ordning som de syns.
   - Inställningarna öppnas i en dialog som stängs med Escape.
 - **Ombrytning:** fungerar på 320 px bred skärm med extra stor text, utan vågrät scroll.
@@ -99,7 +98,6 @@ Biblioteket är [transformers.js](https://github.com/huggingface/transformers.js
 
 ```json
 {
-  "now": "Ni pratar om flytten till nya kontoret.",
   "topics": [
     { "label": "Kontorsflytten", "summary": "Flytten till nya kontoret blir i mars.", "weight": 0.9, "keywords": ["flytten", "nya kontoret"] },
     { "label": "Budget", "summary": "Pengarna till kontoret räcker nästan inte.", "weight": 0.6, "keywords": ["budgeten", "tight"] }
