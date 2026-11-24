@@ -1,6 +1,5 @@
 // Talmoln i webbläsaren: mikrofon → AudioWorklet → chunkning → Whisper (Web Worker)
 // → transkript → Claude (ämnen) → ordmoln. Ingen server behövs.
-import { WordCloud, topicColor } from './cloud.js';
 import { Chunker, cleanText, countWords } from './chunker.js';
 import { TopicLayer } from './topics.js';
 
@@ -28,8 +27,8 @@ const store = {
 
 const SETTINGS_VERSION = 2;
 const DEFAULT_SETTINGS = {
-  v: SETTINGS_VERSION, halfLife: 120, maxWords: 40, interval: 10, llmEnabled: true,
-  model: 'KBLab/kb-whisper-base', showTranscript: true, showSummaries: true, showKeywords: false,
+  v: SETTINGS_VERSION, keepMinutes: 15, maxShown: 8, interval: 10, llmEnabled: true,
+  model: 'KBLab/kb-whisper-base', showTranscript: true, showSummaries: true,
   theme: 'auto', textSize: 'normal', reduceMotion: false,
 };
 let settings = { ...DEFAULT_SETTINGS };
@@ -55,10 +54,15 @@ function loadKey() {
 
 // ---------------------------------------------------------------- Tillstånd
 
-const cloud = new WordCloud($('cloud'));
+// Ett ämne behåller sin färg (samma färg för samma namn).
+const PALETTE = ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'];
+function topicColor(name) {
+  let h = 2166136261;
+  for (const ch of String(name).toLowerCase()) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); }
+  return `var(${PALETTE[(h >>> 0) % PALETTE.length]})`;
+}
 const topics = new TopicLayer({
-  halfLifeSeconds: settings.halfLife, maxWords: settings.maxWords, intervalSeconds: settings.interval,
-  showKeywords: settings.showKeywords,
+  keepSeconds: settings.keepMinutes * 60, maxShown: settings.maxShown, intervalSeconds: settings.interval,
 });
 topics.setApiKey(loadKey());
 topics.setEnabled(settings.llmEnabled);
@@ -260,7 +264,7 @@ async function maybeRefreshTopics() {
   const req = topics.refresh(transcript);
   renderLlm();
   await req;
-  renderCloud();
+  renderSummaries();
   renderLlm();
   saveSession();
 }
@@ -298,7 +302,7 @@ function restoreSession() {
   state.wordsSinceTopics = Number(data.wordsSinceTopics) || 0;
   topics.restore(data.topics);
   for (const seg of state.segments.slice(-50)) addSegment(seg.text);
-  renderCloud();
+  renderSummaries();
   if (state.segments.length || topics.topics.size) {
     log(`Samtalet återställt: ${state.segments.length} meningar, ${topics.topics.size} ämnen`);
   }
@@ -467,16 +471,6 @@ function setMicButton() {
   $('mic-icon').setAttribute('href', on ? '#i-stop' : '#i-mic');
 }
 
-function renderCloud() {
-  const terms = topics.cloudTerms();
-  $('empty').hidden = terms.length > 0;
-  cloud.update(terms);
-  // Molnet är en bild för skärmläsare; samma innehåll finns som lista under.
-  const names = terms.filter((t) => t.kind === 'topic').map((t) => t.text);
-  $('cloud').setAttribute('aria-label', names.length ? `Ordmoln med ämnena: ${names.join(', ')}` : 'Ordmoln, inga ämnen ännu');
-  renderSummaries();
-}
-
 function ago(seconds) {
   if (seconds < 15) return 'nyss';
   if (seconds < 90) return `för ${Math.round(seconds / 5) * 5} sekunder sedan`;
@@ -508,19 +502,42 @@ function renderSummaries() {
     $('now-age').textContent = `Uppdaterat ${ago(age)}`;
     card.classList.toggle('stale', age > 90);
   }
+  renderTopics(nowS);
+}
+
+function topicWhen(t, nowS) {
+  if (t.active) return null; // visas som märket "Pratas om nu"
+  const since = nowS - t.lastMentioned;
+  return since < 60 ? 'Nämndes nyss' : `Nämndes ${ago(since)}`;
+}
+
+/** Ämneskorten: nyaste ämnet överst. Byggs bara om när något har ändrats. */
+let knownTopics = new Set();
+function renderTopics(nowS = Date.now() / 1000) {
   const list = $('topic-list');
-  const items = topics.current().filter((t) => t.summary).slice(0, 4);
-  const key = items.map((t) => `${t.label}|${t.summary}`).join('\n');
+  const items = topics.enabled ? topics.current(nowS).slice(0, topics.cfg.maxShown) : [];
+  const view = items.map((t) => ({ ...t, when: topicWhen(t, nowS) }));
+  const key = view.map((t) => `${t.label}|${t.summary}|${t.active}|${t.when}`).join('\n');
   if (list.dataset.key === key) return;
   list.dataset.key = key;
-  list.replaceChildren(...items.map((t) => {
+  const seen = new Set();
+  list.replaceChildren(...view.map((t) => {
+    seen.add(t.label);
     const li = document.createElement('li');
-    li.style.color = topicColor(t.label);
-    const label = Object.assign(document.createElement('div'), { className: 't-label', textContent: t.label });
-    const summary = Object.assign(document.createElement('div'), { className: 't-summary', textContent: t.summary });
-    li.append(label, summary);
+    li.className = 'topic';
+    if (!knownTopics.has(t.label) && knownTopics.size) li.classList.add('new');
+    if (!t.active && nowS - t.lastMentioned > 5 * 60) li.classList.add('old');
+    li.style.setProperty('--topic-color', topicColor(t.label));
+    const head = Object.assign(document.createElement('div'), { className: 't-head' });
+    head.append(Object.assign(document.createElement('h3'), { className: 't-label', textContent: t.label }));
+    head.append(t.active
+      ? Object.assign(document.createElement('span'), { className: 't-badge', textContent: 'Pratas om nu' })
+      : Object.assign(document.createElement('span'), { className: 't-when', textContent: t.when }));
+    li.append(head);
+    if (t.summary) li.append(Object.assign(document.createElement('p'), { className: 't-summary', textContent: t.summary }));
     return li;
   }));
+  knownTopics = seen.size ? seen : knownTopics;
 }
 
 function addSegment(text) {
@@ -625,10 +642,10 @@ function applySettingsToUi() {
   $('theme').value = settings.theme;
   $('text-size').value = settings.textSize;
   $('reduce-motion').checked = settings.reduceMotion;
-  $('half-life').value = settings.halfLife;
-  $('half-life-out').textContent = `${settings.halfLife} s`;
-  $('top-n').value = settings.maxWords;
-  $('top-n-out').textContent = settings.maxWords;
+  $('keep-min').value = settings.keepMinutes;
+  $('keep-min-out').textContent = `${settings.keepMinutes} minuterna`;
+  $('max-shown').value = settings.maxShown;
+  $('max-shown-out').textContent = settings.maxShown;
   $('llm-interval').value = settings.interval;
   $('llm-interval-out').textContent = `${settings.interval} s`;
   $('asr-model').value = settings.model;
@@ -636,7 +653,6 @@ function applySettingsToUi() {
   document.body.classList.toggle('no-transcript', !settings.showTranscript);
   $('show-summaries').checked = settings.showSummaries;
   document.body.classList.toggle('no-summaries', !settings.showSummaries);
-  $('show-keywords').checked = settings.showKeywords;
   $('api-key').value = topics.apiKey;
   $('remember-key').checked = !!store.get('localStorage', KEY_STORAGE) || !topics.apiKey;
   $('key-status').textContent = topics.apiKey ? 'En nyckel är sparad.' : '';
@@ -651,15 +667,15 @@ function bindRange(id, outId, key, apply, suffix = '') {
     apply(v);
   });
 }
-bindRange('half-life', 'half-life-out', 'halfLife', (v) => { topics.setHalfLife(v); renderCloud(); }, ' s');
-bindRange('top-n', 'top-n-out', 'maxWords', (v) => { topics.cfg.maxWords = v; renderCloud(); });
+bindRange('keep-min', 'keep-min-out', 'keepMinutes', (v) => { topics.cfg.keepSeconds = v * 60; renderSummaries(); }, ' minuterna');
+bindRange('max-shown', 'max-shown-out', 'maxShown', (v) => { topics.cfg.maxShown = v; renderSummaries(); });
 bindRange('llm-interval', 'llm-interval-out', 'interval', (v) => { topics.cfg.intervalSeconds = v; }, ' s');
 
 $('llm-enabled').addEventListener('change', (e) => {
   settings.llmEnabled = e.target.checked;
   saveSettings();
   topics.setEnabled(e.target.checked);
-  renderCloud();
+  renderSummaries();
   renderLlm();
   saveSession();
 });
@@ -681,7 +697,6 @@ for (const [id, key] of [['theme', 'theme'], ['text-size', 'textSize']]) {
     settings[key] = e.target.value;
     saveSettings();
     applyAppearance();
-    cloud.layout(true); // textstorleken påverkar molnets mått
   });
 }
 $('reduce-motion').addEventListener('change', (e) => {
@@ -694,12 +709,6 @@ $('show-summaries').addEventListener('change', (e) => {
   settings.showSummaries = e.target.checked;
   saveSettings();
   document.body.classList.toggle('no-summaries', !e.target.checked);
-});
-$('show-keywords').addEventListener('change', (e) => {
-  settings.showKeywords = e.target.checked;
-  saveSettings();
-  topics.cfg.showKeywords = e.target.checked;
-  renderCloud();
 });
 
 $('show-transcript').addEventListener('change', (e) => {
@@ -760,7 +769,6 @@ $('reset').addEventListener('click', () => {
   state.startedAt = Date.now() / 1000;
   topics.reset();
   $('transcript').replaceChildren();
-  cloud.clear();
   renderSummaries();
   renderLlm();
   log('Samtalet nollställt');
@@ -780,10 +788,11 @@ $('export').addEventListener('click', () => {
       latency_ms: s.latencyMs,
     })),
     transcript: state.segments.map((s) => s.text).join(' '),
-    top: topics.cloudTerms(now),
     now: topics.now?.text || null,
     topics: topics.current(now).map((t) => ({
-      label: t.label, summary: t.summary, score: Math.round(t.score * 1e4) / 1e4, keywords: t.keywords,
+      label: t.label, summary: t.summary, keywords: t.keywords,
+      first_seen: new Date(t.firstSeen * 1000).toISOString(),
+      last_mentioned: new Date(t.lastMentioned * 1000).toISOString(),
     })),
     llm: topics.info(now),
   };
@@ -808,4 +817,4 @@ renderLlm();
 renderSummaries();
 setInterval(maybeRefreshTopics, 1000);
 setInterval(watchdog, WATCHDOG_MS);
-setInterval(() => { if (topics.topics.size || topics.now) renderCloud(); renderLlm(); }, 2000);
+setInterval(() => { if (topics.topics.size || topics.now) renderSummaries(); renderLlm(); }, 2000);

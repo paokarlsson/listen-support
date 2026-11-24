@@ -100,23 +100,6 @@ test('vikter blandas och omdöpta ämnen känns igen', () => {
   assert.ok(Math.abs(t[0].score - (0.25 + 0.1)) < 1e-9);
 });
 
-test('molnet: ämnen störst, ord grupperade under starkaste ämnet', () => {
-  const { layer } = layerWith(null, { keywordFactor: 0.5, showKeywords: true });
-  layer.apply([
-    { label: 'Kontorsflytten', weight: 1, keywords: ['flytten', 'nya kontoret'] },
-    { label: 'Budget', weight: 0.6, keywords: ['budgeten', 'flytten'] },
-  ], 1000);
-  const rows = layer.cloudTerms();
-  assert.deepEqual(rows[0], { text: 'Kontorsflytten', weight: 1, kind: 'topic', topic: 'Kontorsflytten' });
-  assert.equal(rows[1].text, 'Budget');
-  const by = Object.fromEntries(rows.map((r) => [r.text, r]));
-  assert.deepEqual(by.flytten, { text: 'flytten', weight: 0.5, kind: 'keyword', topic: 'Kontorsflytten' });
-  assert.equal(by.budgeten.topic, 'Budget');
-  assert.equal(rows.length, 5);
-  layer.setEnabled(false);
-  assert.deepEqual(layer.cloudTerms(), []);
-});
-
 test('byte av halveringstid behåller nuvarande vikter', () => {
   const { layer, clock } = layerWith(null, { halfLifeSeconds: 100 });
   layer.apply([{ label: 'Budget', weight: 1, keywords: [] }], 1000);
@@ -154,10 +137,35 @@ test('tom just-nu-mening behåller den förra, och av/på tömmer den', () => {
   assert.equal(layer.now, null);
 });
 
-test('nyckelord visas inte i molnet som standard', () => {
+test('nyaste ämnet överst, och ordningen hoppar inte när ett gammalt ämne nämns igen', () => {
   const { layer } = layerWith(null);
-  layer.apply({ now: 'x', topics: [{ label: 'Budget', summary: 's', weight: 1, keywords: ['budgeten'] }] }, 1000);
-  assert.deepEqual(layer.cloudTerms().map((r) => r.text), ['Budget']);
+  layer.apply({ now: '', topics: [{ label: 'Budget', summary: 'a', weight: 0.9, keywords: [] }] }, 1000);
+  layer.apply({ now: '', topics: [{ label: 'Flytten', summary: 'b', weight: 0.9, keywords: [] }] }, 1010);
+  layer.apply({ now: '', topics: [{ label: 'Semester', summary: 'c', weight: 0.9, keywords: [] }] }, 1020);
+  assert.deepEqual(layer.current(1020).map((t) => t.label), ['Semester', 'Flytten', 'Budget']);
+  // Budget pratas om igen: står kvar på sin plats men märks som aktuellt.
+  layer.apply({ now: '', topics: [{ label: 'Budget', summary: 'a2', weight: 0.8, keywords: [] }] }, 1030);
+  const list = layer.current(1031);
+  assert.deepEqual(list.map((t) => t.label), ['Semester', 'Flytten', 'Budget']);
+  assert.deepEqual(list.map((t) => t.active), [false, false, true]);
+  assert.equal(list[2].summary, 'a2');
+});
+
+test('"pratas om nu" kräver tydlig vikt i senaste svaret och slocknar efter en stund', () => {
+  const { layer } = layerWith(null, { activeSeconds: 90, activeWeight: 0.4 });
+  layer.apply({ now: '', topics: [
+    { label: 'Budget', summary: 'a', weight: 0.9, keywords: [] },
+    { label: 'Väder', summary: 'b', weight: 0.1, keywords: [] }] }, 1000);
+  const by = (t) => Object.fromEntries(layer.current(t).map((x) => [x.label, x.active]));
+  assert.deepEqual(by(1000), { Budget: true, Väder: false });
+  assert.deepEqual(by(1100), { Budget: false, Väder: false });
+});
+
+test('ämnen som inte nämnts på keepSeconds försvinner ur listan', () => {
+  const { layer } = layerWith(null, { keepSeconds: 600 });
+  layer.apply({ now: '', topics: [{ label: 'Budget', summary: 'a', weight: 1, keywords: [] }] }, 1000);
+  assert.equal(layer.current(1599).length, 1);
+  assert.equal(layer.current(1601).length, 0);
 });
 
 test('ämnena kan sparas och återställas (överlever omladdning)', () => {
@@ -167,6 +175,8 @@ test('ämnena kan sparas och återställas (överlever omladdning)', () => {
   const saved = JSON.parse(JSON.stringify(layer.serialize()));
   const { layer: fresh } = layerWith(null, { halfLifeSeconds: 60 });
   fresh.restore(saved);
+  assert.equal(fresh.current(1060)[0].firstSeen, 1000);
+  assert.equal(fresh.current(1060)[0].active, true);
   assert.deepEqual(fresh.now, { text: 'Ni pratar om budgeten.', at: 1000 });
   const [t] = fresh.current(1060);
   assert.equal(t.label, 'Budget');

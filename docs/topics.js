@@ -19,10 +19,10 @@ export const DEFAULT_TOPICS = {
   timeoutSeconds: 15,
   maxTokens: 1024,
   halfLifeSeconds: 120,
-  forgetBelow: 0.05,
-  showKeywords: false,
-  keywordFactor: 0.45,
-  maxWords: 40,
+  keepSeconds: 15 * 60,   // ett ämne som inte nämnts på så länge försvinner ur listan
+  activeSeconds: 90,      // "pratas om nu": med i senaste svaret, med vikt ≥ activeWeight
+  activeWeight: 0.4,
+  maxShown: 8,
 };
 
 const SYSTEM_PROMPT = (maxTopics) => `\
@@ -106,6 +106,7 @@ export class TopicLayer {
     this.status = 'pending';
     this.lastError = null;
     this.lastSuccess = null;
+    this.lastSuccessAt = null; // tidpunkten för senaste svaret (samma som ämnenas lastMentioned)
     this.lastAttempt = 0;
     this.inFlight = false;
     this.resetUsage();
@@ -134,6 +135,7 @@ export class TopicLayer {
     this.topics.clear();
     this.now = null;
     this.lastSuccess = null;
+    this.lastSuccessAt = null;
     this.lastAttempt = 0;
     this.resetUsage();
     if (this.status === 'ok') this.status = 'pending';
@@ -175,15 +177,25 @@ export class TopicLayer {
     this.cfg.halfLifeSeconds = Math.max(5, Number(seconds));
   }
 
-  /** Ämnen med avklingad poäng, starkast först. Döda ämnen rensas bort. */
+  /** Ämnen som fortfarande ska visas, med avklingad vikt. Gamla ämnen rensas bort.
+   *  Ordning: nyaste ämnet (först nämnt senast) överst, så att listan inte hoppar runt. */
   current(now = this.clock()) {
     const out = [];
     for (const [key, t] of this.topics) {
-      const s = this.scoreAt(t, now);
-      if (s < this.cfg.forgetBelow) { this.topics.delete(key); continue; }
-      out.push({ label: t.label, score: s, keywords: t.keywords, summary: t.summary || '' });
+      if (now - t.lastMentioned > this.cfg.keepSeconds) { this.topics.delete(key); continue; }
+      out.push({
+        label: t.label,
+        summary: t.summary || '',
+        keywords: t.keywords,
+        score: this.scoreAt(t, now),
+        firstSeen: t.firstSeen,
+        lastMentioned: t.lastMentioned,
+        // Pratas om nu: med i senaste svaret från Claude, med tydlig vikt.
+        active: t.lastMentioned === this.lastSuccessAt && t.lastWeight >= this.cfg.activeWeight
+          && now - t.lastMentioned <= this.cfg.activeSeconds,
+      });
     }
-    return out.sort((a, b) => b.score - a.score);
+    return out.sort((a, b) => b.firstSeen - a.firstSeen || b.score - a.score);
   }
 
   /** Allt som behövs för att återställa ämnena efter en omladdning av sidan. */
@@ -192,6 +204,7 @@ export class TopicLayer {
       topics: [...this.topics.values()].map((t) => ({ ...t })),
       now: this.now,
       lastSuccess: this.lastSuccess,
+      lastSuccessAt: this.lastSuccessAt,
       usage: { ...this.usage },
     };
   }
@@ -204,35 +217,15 @@ export class TopicLayer {
       this.topics.set(norm(t.label), {
         label: t.label, score: t.score, updated: t.updated,
         keywords: Array.isArray(t.keywords) ? t.keywords : [], summary: t.summary || '',
+        firstSeen: Number.isFinite(t.firstSeen) ? t.firstSeen : t.updated,
+        lastMentioned: Number.isFinite(t.lastMentioned) ? t.lastMentioned : t.updated,
+        lastWeight: Number.isFinite(t.lastWeight) ? t.lastWeight : 0,
       });
     }
     this.now = data.now?.text ? { text: data.now.text, at: data.now.at } : null;
     this.lastSuccess = Number.isFinite(data.lastSuccess) ? data.lastSuccess : null;
+    this.lastSuccessAt = Number.isFinite(data.lastSuccessAt) ? data.lastSuccessAt : null;
     if (data.usage) this.usage = { ...this.usage, ...data.usage };
-  }
-
-  /** Det som visas i molnet: ämnesnamn som stora ord och ämnenas ord runt omkring. */
-  cloudTerms(now = this.clock()) {
-    const topics = this.enabled ? this.current(now) : [];
-    if (!topics.length) return [];
-    const rows = new Map();
-    for (const t of topics) rows.set(norm(t.label), { text: t.label, weight: t.score, kind: 'topic', topic: t.label });
-    if (this.cfg.showKeywords) {
-      for (const t of topics) {
-        for (const kw of t.keywords) {
-          const key = norm(kw);
-          const w = t.score * this.cfg.keywordFactor;
-          if (!key || (rows.has(key) && rows.get(key).weight >= w)) continue;
-          rows.set(key, { text: kw, weight: w, kind: 'keyword', topic: t.label });
-        }
-      }
-    }
-    const out = [...rows.values()]
-      .sort((a, b) => b.weight - a.weight || (a.kind === 'topic' ? -1 : 1) - (b.kind === 'topic' ? -1 : 1) || a.text.localeCompare(b.text))
-      .slice(0, this.cfg.maxWords);
-    const top = out[0].weight || 1;
-    for (const r of out) r.weight = Math.round((r.weight / top) * 10000) / 10000;
-    return out;
   }
 
   // -- anrop ----------------------------------------------------------------
@@ -263,7 +256,7 @@ export class TopicLayer {
   }
 
   buildRequest(transcript, now = this.clock()) {
-    const previous = this.current(now).map((t) => ({
+    const previous = this.current(now).sort((a, b) => b.lastMentioned - a.lastMentioned).slice(0, 12).map((t) => ({
       label: t.label, weight: Math.round(t.score * 100) / 100, keywords: t.keywords.slice(0, 8),
     }));
     const user = 'Föregående ämneslista (återanvänd namnen när ämnet är detsamma):\n'
@@ -378,14 +371,20 @@ export class TopicLayer {
       }
       used.add(key);
       if (!existing) {
-        this.topics.set(key, { label, score: weight, updated: now, keywords: kws, summary });
+        this.topics.set(key, {
+          label, score: weight, updated: now, keywords: kws, summary,
+          firstSeen: now, lastMentioned: now, lastWeight: weight,
+        });
       } else {
         existing.score = 0.5 * this.scoreAt(existing, now) + 0.5 * weight;
         existing.updated = now;
+        existing.lastMentioned = now;
+        existing.lastWeight = weight;
         if (kws.length) existing.keywords = kws;
         if (summary) existing.summary = summary;
       }
     }
+    this.lastSuccessAt = now;
   }
 
   /** Hitta ett befintligt ämne med i stort sett samma ord (Claude har bytt namn). */

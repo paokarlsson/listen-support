@@ -1,6 +1,6 @@
 # Talmoln 🎙️☁️
 
-Ett levande ordmoln av det du pratar om. Du pratar, telefonen lyssnar. Ämnen som återkommer växer i molnet, och det som inte nämns på ett tag krymper.
+Ett stöd för att hänga med i ett samtal. Du pratar, telefonen lyssnar, och appen visar vilka ämnen samtalet handlar om, med en kort förklaring till varje. Det nyaste ämnet står överst.
 
 Talmoln är tänkt som ett **stöd för människor med nedsatt kognitiv förmåga**: det visar med korta meningar på lättläst svenska vad samtalet handlar om just nu, så att det blir lättare att hänga med.
 
@@ -21,8 +21,8 @@ Allt körs **i webbläsaren**. Whisper transkriberar talet lokalt på telefonen,
 - **Live-transkribering** av svenska med Whisper, i webbläsaren.
 - **Just nu**: en mening överst på lättläst svenska om vad samtalet handlar om just nu, till exempel "Ni pratar om var ni ska åka på semester i sommar." Den visar också hur gammal den är.
 - **Ämnen med förklaring**: varje ämne får ett kort namn och en mening om vad som sägs, till exempel *Kontorsflytten – Flytten till nya kontoret blir i mars.*
-- **Ordmoln**: ämnesnamnen, i samma färg som i listan. Storleken motsvarar hur mycket det pratas om ämnet just nu. Ämnenas nyckelord kan visas runt omkring (av som standard, för att hålla det lugnt).
-- **Tidsavklingning**: gamla ämnen tonar ut så att molnet visar det som pågår nu.
+- **Ämnen med förklaring** är huvudinnehållet: stora kort med ämnets namn och en mening om vad som sägs. **Nyaste ämnet överst.** Ordningen styrs av när ämnet först dök upp, så listan hoppar inte runt. Det som pratas om just nu får märket *Pratas om nu*, övriga visar när de senast nämndes (*Nämndes för 3 minuter sedan*).
+- **Gamla ämnen försvinner** när de inte nämnts på 15 minuter (inställbart 5–60 minuter). Högst 8 ämnen visas (inställbart 3–12).
 - **Sparas på enheten**: samtalet (det som sagts, ämnena och Just nu) sparas i webbläsarens `localStorage` och finns kvar om sidan laddas om. *Inställningar → Data → Nollställ samtalet* tar bort det.
 
 Inte i scope: talaridentifiering, konton eller delning, analys av retorik.
@@ -41,7 +41,7 @@ Gränssnittet följer **WCAG 2.2 nivå AA**, och nivå AAA där det går:
   - En länk för att hoppa direkt till Just nu, och tydliga fokusmarkeringar.
   - Rubriker och landmärken.
   - "Just nu" läses upp när den ändras.
-  - Ordmolnet har en textbeskrivning, och samma innehåll finns som lista.
+  - Ämnena är en vanlig lista med rubriker, i samma ordning som de syns.
   - Inställningarna öppnas i en dialog som stängs med Escape.
 - **Ombrytning:** fungerar på 320 px bred skärm med extra stor text, utan vågrät scroll.
 
@@ -59,7 +59,7 @@ Kontrollerat automatiskt med axe-core (WCAG 2.0–2.2 A/AA) i ljust och mörkt t
 │                                  Web Worker: Whisper (transformers.js,
 │                                  WebGPU eller WebAssembly)          │
 │                                              ↓ text                 │
-│  Ordmoln + transkript  ◄──────  ämneslager ──┼──────────────────────┼──► Claude API
+│  Ämnen + transkript    ◄──────  ämneslager ──┼──────────────────────┼──► Claude API
 │                                              │                      │   (text, var ~20 s)
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -109,16 +109,17 @@ Biblioteket är [transformers.js](https://github.com/huggingface/transformers.js
 
 Systemprompten (`docs/topics.js`) säger att texten är till för en person med nedsatt kognitiv förmåga och ber om lättläst svenska: högst 15 ord per mening, vanliga och konkreta ord, inga förkortningar, och vad som faktiskt sägs (vem, vad, när) i stället för abstrakta beskrivningar.
 
-**Molnet:**
-- Ämnesnamnen är de stora orden. Med *Visa nyckelord i molnet* påslaget visas ämnenas ord runt omkring i samma färg, i 45 % av ämnets storlek.
-- Vikterna avklingar mellan anropen: `vikt(t) = vikt(t0) · exp(-ln2 · (t - t0) / halveringstid)`, standard 120 s. Ett nytt svar blandas 50/50 med den avklingade gamla vikten, så molnet ändras mjukt.
+**Ämneslistan:**
+- Varje ämne minns när det först dök upp (`firstSeen`) och när Claude senast nämnde det (`lastMentioned`). Listan sorteras på `firstSeen`, nyaste överst.
+- *Pratas om nu*: ämnet fanns med i Claudes senaste svar, med vikt minst 0,4, och svaret är högst 90 s gammalt.
+- Ett ämne som inte nämnts på 15 minuter tas bort. Förklaringen uppdateras när Claude säger något nytt om ämnet.
 - **Ämnesstabilitet:** om Claude döper om ett ämne men orden i stort sett är desamma (Jaccard ≥ 0,5) behålls det gamla namnet.
 
 **Felhantering:** timeout på 15 s. Vid fel behålls senaste ämnen och de avklingar, och ett nytt försök görs vid nästa intervall. Indikatorn i sidhuvudet visar `offline` (inget nät, timeout) eller `fel` (HTTP-fel, avböjd förfrågan, svar utan verktygsanrop).
 
 **Kostnad:** som mest ett anrop per ~10 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Inställningarna visar tokens för sessionen.
 
-**Integritet:** i inställningarna slås Claude av och på. När det slås av försvinner Claudes ämnen ur molnet direkt, och ett svar som kommer under tiden slängs.
+**Integritet:** i inställningarna slås Claude av och på. När det slås av försvinner Claudes ämnen direkt, och ett svar som kommer under tiden slängs.
 
 ### API-nyckeln
 
@@ -153,11 +154,10 @@ Systemprompten (`docs/topics.js`) säger att texten är till för en person med 
 │   └── test.yml              # tester på andra grenar och pull requests
 ├── docs/                     # webbappen (GitHub Pages)
 │   ├── index.html, style.css
-│   ├── app.js                # mic → worklet → chunkning → Whisper-worker → Claude → moln
+│   ├── app.js                # mic → worklet → chunkning → Whisper-worker → Claude → ämneskort
 │   ├── asr-worker.js         # Whisper i en Web Worker (transformers.js)
 │   ├── chunker.js            # chunkning vid tystnad, VAD, hallucinationsfilter
-│   ├── topics.js             # ämneslagret: anropar Claude, tolkar svaret, bygger molnet
-│   ├── cloud.js              # ordmolnet (egen layout, mjuka animationer)
+│   ├── topics.js             # ämneslagret: anropar Claude, tolkar svaret, håller ämneslistan
 │   ├── fonts/                # Atkinson Hyperlegible (SIL Open Font License)
 │   └── pcm-worklet.js        # AudioWorkletProcessor: mikrofon → float32 @16 kHz
 └── tests/                    # node --test
@@ -166,7 +166,6 @@ Systemprompten (`docs/topics.js`) säger att texten är till för en person med 
     └── network.test.mjs      # inget utom Anthropic och jsDelivr anropas
 ```
 
-**Varför en egen ordmolnsritare och inte `wordcloud2.js`?** Den lägger ut hela molnet från noll vid varje anrop, så alla ord hoppar runt. `cloud.js` låter ord som redan finns stanna kvar och animerar storlek, position och opacitet.
 
 ---
 
@@ -185,7 +184,7 @@ Mikrofonen kräver `https://` eller `localhost`.
 
 - [x] Mikrofon → PCM → chunkning i webbläsaren
 - [x] Whisper i webbläsaren (KB-Whisper base, OpenAI:s base som reserv)
-- [x] Ämneslager med Claude, live-ordmoln med avklingning
+- [x] Ämneslager med Claude: ämnen med förklaring på lättläst svenska, nyaste överst (ordmolnet borttaget)
 - [x] Inställningar: nyckel, halveringstid, antal ord, intervall, modell, reset, export
 - [ ] Offline-läge (valfritt): lokal språkmodell i webbläsaren i stället för Claude
 
@@ -195,6 +194,6 @@ Mikrofonen kräver `https://` eller `localhost`.
 
 - **Whisper i webbläsaren på telefon** är det största osäkerhetsmomentet: hastigheten beror på WebGPU, och KB-Whisper kanske inte finns i ONNX-format.
 - **Första nedladdningen** är stor (modell plus ONNX Runtime). Gör den gärna på wifi.
-- **Molnet kräver nät:** utan uppkoppling eller nyckel visas bara transkriptet.
+- **Ämnena kräver nät:** utan uppkoppling eller nyckel visas bara det som sägs.
 - **Fördröjning:** första ämnena dyker upp efter ~20 ord plus svarstiden från Claude.
 - **Integritet:** transkriberad text skickas till Anthropic när Claude är på. Av/på finns i inställningarna.

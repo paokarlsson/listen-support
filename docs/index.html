@@ -82,15 +82,8 @@
       <p id="now-age" class="now-age"></p>
     </section>
 
-    <section class="card cloud-card" aria-labelledby="cloud-heading">
-      <h2 id="cloud-heading" class="visually-hidden">Ordmoln</h2>
-      <div id="cloud" class="cloud" role="img" aria-label="Ordmoln, inga ämnen ännu">
-        <p id="empty" class="empty" aria-hidden="true">Här växer ämnena fram.</p>
-      </div>
-    </section>
-
     <section id="topics-section" class="topics-section" aria-labelledby="topics-heading">
-      <h2 id="topics-heading" class="eyebrow">Ämnen</h2>
+      <h2 id="topics-heading" class="eyebrow">Ämnen <span class="eyebrow-note">nyaste överst</span></h2>
       <ul id="topic-list" class="topic-list"></ul>
     </section>
 
@@ -143,7 +136,6 @@
         </label>
         <label class="switch"><input id="reduce-motion" type="checkbox"><span>Minska rörelser</span></label>
         <label class="switch"><input id="show-summaries" type="checkbox" checked><span>Visa förklaringar till ämnena</span></label>
-        <label class="switch"><input id="show-keywords" type="checkbox"><span>Visa nyckelord i molnet</span></label>
         <label class="switch"><input id="show-transcript" type="checkbox" checked><span>Visa det som sagts</span></label>
       </section>
 
@@ -184,15 +176,15 @@
         <p id="asr-status" class="help">Modellen laddas ner första gången du trycker på Starta och sparas sedan i webbläsaren.</p>
       </section>
 
-      <section class="group" aria-labelledby="g-cloud">
-        <h3 id="g-cloud">Ordmolnet</h3>
+      <section class="group" aria-labelledby="g-topics">
+        <h3 id="g-topics">Ämnen</h3>
         <label class="field">
-          <span class="field-label">Gamla ämnen tonar ut efter <output id="half-life-out" for="half-life">120 s</output></span>
-          <input id="half-life" type="range" min="15" max="900" step="15" value="120">
+          <span class="field-label">Visa ämnen från de senaste <output id="keep-min-out" for="keep-min">15 minuterna</output></span>
+          <input id="keep-min" type="range" min="5" max="60" step="5" value="15">
         </label>
         <label class="field">
-          <span class="field-label">Högst <output id="top-n-out" for="top-n">40</output> ord</span>
-          <input id="top-n" type="range" min="5" max="80" step="5" value="40">
+          <span class="field-label">Visa högst <output id="max-shown-out" for="max-shown">8</output> ämnen</span>
+          <input id="max-shown" type="range" min="3" max="12" step="1" value="8">
         </label>
       </section>
 
