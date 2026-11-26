@@ -9,6 +9,26 @@ export const API_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_VERSION = '2026-10-21';
 export const TOOL_NAME = 'report_topics';
 
+// Pris i USD per miljon tokens (Anthropics listpris). Haiku 5.5 kostar mer när
+// en förfrågan har fler än 100 000 tokens in. Cache: skrivning 1,25×, läsning 0,1×.
+export const PRICES = {
+  'claude-haiku-5-5': { input: 0.10, output: 0.50, longInput: 0.50, longOutput: 2.50, longAbove: 100_000 },
+};
+
+/** Uppskattad kostnad i USD för ett anrop, utifrån svarets usage-fält. */
+export function callCost(model, u = {}) {
+  const p = PRICES[model];
+  if (!p) return 0;
+  const inTok = u.input_tokens || 0;
+  const cacheWrite = u.cache_creation_input_tokens || 0;
+  const cacheRead = u.cache_read_input_tokens || 0;
+  const long = p.longAbove && inTok + cacheWrite + cacheRead > p.longAbove;
+  const inPrice = long ? p.longInput : p.input;
+  const outPrice = long ? p.longOutput : p.output;
+  return (inTok * inPrice + cacheWrite * inPrice * 1.25 + cacheRead * inPrice * 0.1
+    + (u.output_tokens || 0) * outPrice) / 1e6;
+}
+
 export const DEFAULT_TOPICS = {
   model: 'claude-haiku-5-5',
   intervalSeconds: 10,
@@ -92,12 +112,14 @@ export class TopicError extends Error {
 const norm = (s) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
 export class TopicLayer {
-  constructor(opts = {}, { fetchFn, clock } = {}) {
+  constructor(opts = {}, { fetchFn, clock, onUsage } = {}) {
     this.cfg = { ...DEFAULT_TOPICS, ...opts };
     this.apiKey = '';
     this.enabled = true;
     this.fetch = fetchFn || ((...a) => fetch(...a));
     this.clock = clock || (() => Date.now() / 1000);
+    // Anropas efter varje lyckat svar: { inputTokens, outputTokens, costUsd }.
+    this.onUsage = onUsage || null;
     this.topics = new Map(); // norm(label) → { label, score, updated, keywords, summary }
     this.now = null;         // { text, at }: vad samtalet handlar om just nu
     this.status = 'pending';
@@ -125,7 +147,7 @@ export class TopicLayer {
   }
 
   resetUsage() {
-    this.usage = { calls: 0, failed: 0, inputTokens: 0, outputTokens: 0 };
+    this.usage = { calls: 0, failed: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
   }
 
   reset() {
@@ -308,9 +330,18 @@ export class TopicLayer {
     this.usage.calls++;
     this.usage.inputTokens += u.input_tokens || 0;
     this.usage.outputTokens += u.output_tokens || 0;
+    const costUsd = callCost(body.model, u);
+    this.usage.costUsd = (this.usage.costUsd || 0) + costUsd;
+    try {
+      this.onUsage?.({
+        inputTokens: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0),
+        outputTokens: u.output_tokens || 0,
+        costUsd,
+      });
+    } catch (err) { console.warn('Ämneslagret: onUsage', err); }
     console.info(`Ämneslagret: ${u.input_tokens || 0} tokens in, ${u.output_tokens || 0} ut, `
       + `${((performance.now() - started) / 1000).toFixed(1)} s (sessionen: ${this.usage.inputTokens} in, `
-      + `${this.usage.outputTokens} ut, ${this.usage.calls} anrop)`);
+      + `${this.usage.outputTokens} ut, ${this.usage.calls} anrop, ${this.usage.costUsd.toFixed(4)} USD)`);
 
     if (data.stop_reason === 'refusal') throw new TopicError('error', 'Claude avböjde förfrågan');
     for (const block of data.content || []) {

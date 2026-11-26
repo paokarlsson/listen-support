@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TopicLayer, TOOL_NAME, API_URL } from '../docs/topics.js';
+import { TopicLayer, TOOL_NAME, API_URL, callCost } from '../docs/topics.js';
 
 const toolResponse = (topics, usage = [1200, 80], now = '') => ({
   content: [{ type: 'tool_use', id: 't', name: TOOL_NAME, input: { now, topics } }],
@@ -36,7 +36,37 @@ test('anropet ser rätt ut och svaret tolkas', async () => {
   assert.deepEqual(layer.current().map((t) => t.label), ['Kontorsflytten', 'Budget']);
   const info = layer.info();
   assert.equal(info.status, 'ok');
-  assert.deepEqual(info.usage, { calls: 1, failed: 0, inputTokens: 1200, outputTokens: 80 });
+  // 1200 × 0,10 + 80 × 0,50 USD per miljon tokens
+  assert.deepEqual(info.usage, { calls: 1, failed: 0, inputTokens: 1200, outputTokens: 80, costUsd: 0.00016 });
+});
+
+test('kostnaden räknas per anrop och rapporteras via onUsage', async () => {
+  const reported = [];
+  const layer = new TopicLayer({}, {
+    fetchFn: async () => json(200, toolResponse([{ label: 'A', summary: 's', weight: 1, keywords: [] }], [2000, 200])),
+    clock: () => 1000,
+    onUsage: (u) => reported.push(u),
+  });
+  layer.setApiKey('k');
+  await layer.refresh('hej hej');
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].inputTokens, 2000);
+  assert.equal(reported[0].outputTokens, 200);
+  assert.ok(Math.abs(reported[0].costUsd - 0.0003) < 1e-12);
+  assert.ok(Math.abs(layer.usage.costUsd - 0.0003) < 1e-12);
+  layer.reset();
+  assert.equal(layer.usage.costUsd, 0);
+});
+
+test('callCost: långa förfrågningar, cache och okänd modell', () => {
+  const m = 'claude-haiku-5-5';
+  assert.ok(Math.abs(callCost(m, { input_tokens: 100_000, output_tokens: 10_000 }) - (0.01 + 0.005)) < 1e-9);
+  // över 100 000 tokens in: 0,50 / 2,50 USD per miljon
+  assert.ok(Math.abs(callCost(m, { input_tokens: 200_000, output_tokens: 1000 }) - (0.1 + 0.0025)) < 1e-9);
+  assert.ok(Math.abs(callCost(m, { cache_read_input_tokens: 100_000 }) - 0.001) < 1e-9);
+  assert.ok(Math.abs(callCost(m, { cache_creation_input_tokens: 100_000 }) - 0.0125) < 1e-9);
+  assert.equal(callCost('okänd-modell', { input_tokens: 1000 }), 0);
+  assert.equal(callCost(m), 0);
 });
 
 test('föregående ämnen skickas med', async () => {

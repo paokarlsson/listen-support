@@ -165,6 +165,21 @@
         <p id="llm-usage" class="help"></p>
       </section>
 
+      <section class="group" aria-labelledby="g-cost">
+        <h3 id="g-cost">Kostnad för Claude</h3>
+        <dl id="cost-list" class="cost-list">
+          <div><dt>Det här samtalet</dt><dd id="cost-session">–</dd></div>
+          <div><dt>I dag</dt><dd id="cost-today">–</dd></div>
+          <div><dt>Den här månaden</dt><dd id="cost-month">–</dd></div>
+          <div><dt id="cost-total-label">Totalt</dt><dd id="cost-total">–</dd></div>
+        </dl>
+        <p id="cost-detail" class="help"></p>
+        <p class="help">Uppskattning utifrån antalet tokens och Anthropics listpris, i amerikanska dollar. Kostnaden sparas på den här enheten och finns kvar när samtalet nollställs. Den exakta kostnaden ser du på Anthropics webbplats.</p>
+        <div class="row">
+          <button type="button" id="reset-cost" class="btn">Nollställ kostnaden</button>
+        </div>
+      </section>
+
       <section class="group" aria-labelledby="g-asr">
         <h3 id="g-asr">Taligenkänning</h3>
         <label class="field">

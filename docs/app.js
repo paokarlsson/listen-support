@@ -61,9 +61,61 @@ function topicColor(name) {
   for (const ch of String(name).toLowerCase()) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); }
   return `var(${PALETTE[(h >>> 0) % PALETTE.length]})`;
 }
+// ---------------------------------------------------------------- Kostnad
+
+// Sammanlagd kostnad för Claude-anropen, sparad på enheten. Finns kvar när
+// samtalet nollställs; nollställs bara med knappen under Inställningar.
+const COST_STORAGE = 'talmoln.cost';
+const COST_KEEP_DAYS = 400;
+const emptyCost = () => ({ since: Date.now(), calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, days: {} });
+let cost = emptyCost();
+try {
+  const saved = JSON.parse(store.get('localStorage', COST_STORAGE) || 'null');
+  if (saved && Number.isFinite(saved.costUsd)) cost = { ...cost, ...saved, days: saved.days || {} };
+} catch { /* ignoreras */ }
+const saveCost = () => store.set('localStorage', COST_STORAGE, JSON.stringify(cost));
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+function addCost({ inputTokens, outputTokens, costUsd }) {
+  cost.calls++;
+  cost.inputTokens += inputTokens;
+  cost.outputTokens += outputTokens;
+  cost.costUsd += costUsd;
+  const today = dayKey();
+  cost.days[today] = (cost.days[today] || 0) + costUsd;
+  const keys = Object.keys(cost.days).sort();
+  for (const k of keys.slice(0, Math.max(0, keys.length - COST_KEEP_DAYS))) delete cost.days[k];
+  saveCost();
+}
+
+const usd = (v) => {
+  const digits = v === 0 ? 2 : v < 0.01 ? 4 : v < 1 ? 3 : 2;
+  return `${v.toLocaleString('sv-SE', { minimumFractionDigits: digits, maximumFractionDigits: digits })} USD`;
+};
+const num = (v) => v.toLocaleString('sv-SE');
+
+function renderCost() {
+  if (!$('settings').open) return;
+  const today = dayKey();
+  const month = today.slice(0, 7);
+  const monthUsd = Object.entries(cost.days).reduce((s, [k, v]) => (k.startsWith(month) ? s + v : s), 0);
+  $('cost-session').textContent = usd(topics.usage.costUsd || 0);
+  $('cost-today').textContent = usd(cost.days[today] || 0);
+  $('cost-month').textContent = usd(monthUsd);
+  const since = new Date(cost.since);
+  const sinceText = since.toLocaleDateString('sv-SE', {
+    day: 'numeric', month: 'short', ...(since.getFullYear() !== new Date().getFullYear() && { year: 'numeric' }),
+  });
+  $('cost-total-label').textContent = `Totalt sedan ${sinceText}`;
+  $('cost-total').textContent = usd(cost.costUsd);
+  $('cost-detail').textContent = cost.calls
+    ? `${num(cost.calls)} anrop, ${num(cost.inputTokens)} tokens in och ${num(cost.outputTokens)} tokens ut.`
+    : 'Inga anrop ännu.';
+}
+
 const topics = new TopicLayer({
   keepSeconds: settings.keepMinutes * 60, maxShown: settings.maxShown, intervalSeconds: settings.interval,
-});
+}, { onUsage: addCost });
 topics.setApiKey(loadKey());
 topics.setEnabled(settings.llmEnabled);
 
@@ -611,6 +663,7 @@ function renderLlm() {
     ? `Den här sessionen: ${u.calls} anrop, ${u.inputTokens} tokens in, ${u.outputTokens} ut`
       + (u.failed ? `, ${u.failed} misslyckade` : '') + '.'
     : '';
+  renderCost();
   setNotice(!llm.hasKey
     ? 'Ordmolnet kommer från Claude. Ange din Anthropic API-nyckel under Inställningar. Det som sägs skrivs ut ändå.'
     : !llm.enabled ? 'Ämnen med Claude är avslaget, så molnet är tomt. Slå på det under Inställningar.'
@@ -722,6 +775,7 @@ function openSettings() {
   applySettingsToUi();
   $('diag-log').textContent = state.log.slice(-60).join('\n') || '(inget ännu)';
   $('settings').showModal();
+  renderCost();
   const said = $('transcript');
   said.scrollTop = said.scrollHeight; // visa de senaste meningarna
 }
@@ -752,6 +806,14 @@ $('reset').addEventListener('click', () => {
   renderLlm();
   log('Samtalet nollställt');
   $('settings').close();
+});
+
+$('reset-cost').addEventListener('click', () => {
+  if (!confirm('Nollställa den sparade kostnaden? Räkningen börjar om från noll.')) return;
+  cost = emptyCost();
+  saveCost();
+  renderCost();
+  log('Kostnaden nollställd');
 });
 
 $('export').addEventListener('click', () => {

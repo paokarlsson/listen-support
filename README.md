@@ -115,7 +115,7 @@ Systemprompten (`docs/topics.js`) säger att texten är till för en person med 
 
 **Felhantering:** timeout på 15 s. Vid fel behålls senaste ämnen och de avklingar, och ett nytt försök görs vid nästa intervall. Indikatorn i sidhuvudet visar `offline` (inget nät, timeout) eller `fel` (HTTP-fel, avböjd förfrågan, svar utan verktygsanrop).
 
-**Kostnad:** som mest ett anrop per ~10 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Inställningarna visar tokens för sessionen.
+**Kostnad:** som mest ett anrop per ~10 s med några tusen tokens in och ett par hundra ut. Med Haiku blir en timmes samtal billigt. Under Inställningar → Kostnad för Claude visas en uppskattad kostnad i USD (utifrån tokens och listpriset, se `PRICES` i `topics.js`) för det här samtalet, i dag, den här månaden och totalt. Totalen sparas på enheten, finns kvar när samtalet nollställs och kan nollställas separat.
 
 **Integritet:** i inställningarna slås Claude av och på. När det slås av försvinner Claudes ämnen direkt, och ett svar som kommer under tiden slängs.
 

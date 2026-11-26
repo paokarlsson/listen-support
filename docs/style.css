@@ -293,6 +293,10 @@ dialog::backdrop { background: rgb(0 0 0 / 55%); }
 .switch input { width: 1.5rem; height: 1.5rem; accent-color: var(--accent); flex: none; }
 .help { font-size: 0.9375rem; color: var(--muted); }
 .help:empty { display: none; }
+.cost-list { margin: 0; display: grid; gap: 0.25rem; }
+.cost-list div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.25rem 0; border-bottom: 1px solid var(--hairline); }
+.cost-list div:last-child { border-bottom: 0; font-weight: 700; }
+.cost-list dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .row .btn { flex: 1 1 6rem; }
 .diag summary { min-height: var(--touch); display: flex; align-items: center; font-weight: 700; cursor: pointer; }
