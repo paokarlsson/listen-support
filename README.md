@@ -157,6 +157,8 @@ Systemprompten (`docs/topics.js`) säger att texten är till för en person med 
 │   ├── chunker.js            # chunkning vid tystnad, VAD, hallucinationsfilter
 │   ├── topics.js             # ämneslagret: anropar Claude, tolkar svaret, håller ämneslistan
 │   ├── fonts/                # Atkinson Hyperlegible (SIL Open Font License)
+│   ├── manifest.webmanifest  # gör sidan installerbar som app (hemskärm/skrivbord)
+│   ├── icons/                # appikoner: SVG, 192/512 px, maskable och Apple touch-ikon
 │   └── pcm-worklet.js        # AudioWorkletProcessor: mikrofon → float32 @16 kHz
 └── tests/                    # node --test
     ├── chunker.test.mjs

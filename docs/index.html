@@ -8,6 +8,14 @@
   <meta name="theme-color" content="#0e1217" media="(prefers-color-scheme: dark)">
   <meta name="description" content="Talmoln visar med korta, lättlästa meningar vad ett samtal handlar om just nu.">
   <title>Talmoln – vad pratar vi om?</title>
+  <!-- Installerbar webbapp: "Lägg till på hemskärmen" / "Installera app". -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="Talmoln">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <!-- Ger sidan "cross-origin isolation" (som GitHub Pages inte kan ge med headers), så att
        Whisper kan räkna på flera processorkärnor. Laddar om sidan en gång vid första besöket. -->
   <script src="coi-serviceworker.js"></script>
